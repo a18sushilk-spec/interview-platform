@@ -58,7 +58,14 @@ function speak(text, onEnd) {
       voices.find((v) => /Google UK English Female|Samantha|Microsoft Aria/i.test(v.name)) ||
       voices.find((v) => /en-US|en-GB/i.test(v.lang));
     if (pref) u.voice = pref;
-    if (onEnd) u.onend = onEnd;
+    if (onEnd) {
+      let fired = false;
+      const done = () => { if (!fired) { fired = true; onEnd(); } };
+      u.onend = done;
+      u.onerror = done;
+      // Fallback: if onend never fires, move on after estimated duration
+      setTimeout(done, Math.max(text.length * 75, 4000));
+    }
     window.speechSynthesis.speak(u);
   } catch (e) { if (onEnd) onEnd(); }
 }
@@ -275,13 +282,15 @@ function Interview({ resume, jd, role, onFinish }) {
     rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
     finalRef.current = "";
     rec.onresult = (e) => {
+      let final = "";
       let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
+      for (let i = 0; i < e.results.length; i++) {
         const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) finalRef.current += t + " ";
+        if (e.results[i].isFinal) final += t + " ";
         else interim += t;
       }
-      setLiveText(finalRef.current + interim);
+      finalRef.current = final;
+      setLiveText(final + interim);
     };
     rec.onerror = () => {};
     rec.onend = () => {};
