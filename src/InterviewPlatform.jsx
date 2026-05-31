@@ -1,4 +1,5 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
+import { track, identify, resetUser, reportError } from "./analytics";
 
 // ── Design tokens ─────────────────────────────────────────────────────────────
 const C = {
@@ -132,16 +133,21 @@ export default function App() {
     localStorage.setItem("pl_token", token);
     localStorage.setItem("pl_user", JSON.stringify(u));
     setUser(u);
-    if (authPending) { setAuthPending(false); setStage("interview"); }
+    identify(u);
+    track("user_logged_in", { email: u.email });
+    if (authPending) { setAuthPending(false); setStage("interview"); track("interview_started"); }
     else setStage("setup");
   };
   const logout = () => {
     localStorage.removeItem("pl_token"); localStorage.removeItem("pl_user");
     setUser(null);
+    track("user_logged_out");
+    resetUser();
   };
   const handleStart = () => {
     const hasToken = !!localStorage.getItem("pl_token");
-    if (user || hasToken) setStage("interview");
+    track("begin_interview_clicked", { logged_in: !!(user || hasToken) });
+    if (user || hasToken) { setStage("interview"); track("interview_started"); }
     else { setAuthPending(true); setStage("auth"); }
   };
   const freshStart = () => {
@@ -182,7 +188,12 @@ export default function App() {
       {stage === "interview" && (
         <Interview key={interviewKey} resume={resume} jd={jd} role={role}
           company={company} industry={industry} onFreshStart={freshStart}
-          onFinish={(t, r) => { localStorage.removeItem("pl_interview_progress"); setTranscript(t); setReport(r); setStage("report"); }} />
+          onFinish={(t, r) => {
+            localStorage.removeItem("pl_interview_progress");
+            track("interview_completed", { questions_answered: t.length, score: r?.overall ?? null });
+            setTranscript(t); setReport(r); setStage("report");
+            track("report_viewed", { score: r?.overall ?? null });
+          }} />
       )}
       {stage === "report"    && (
         <Report transcript={transcript} report={report} role={role}
@@ -347,7 +358,10 @@ function Setup({ resume, setResume, jd, setJd, role, setRole, company, setCompan
   const fileRef = useRef(null);
   const ready   = resume.trim().length > 40 && role.trim().length > 1;
 
-  useEffect(() => { fetch("/api/ratings").then(r=>r.json()).then(setRatings).catch(()=>{}); }, []);
+  useEffect(() => {
+    track("landing_viewed");
+    fetch("/api/ratings").then(r=>r.json()).then(setRatings).catch(()=>{});
+  }, []);
 
   const handleUpload = async (file) => {
     if (!file) return;
@@ -562,6 +576,7 @@ function QuickReview({ onDone }) {
   const submit=async()=>{
     if(!star){setErr("Please pick a rating.");return;}
     try{await fetch("/api/ratings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,rating:star,review:text,role})});
+    track("review_submitted", { rating: star, source: "homepage" });
     setDone(true);onDone({name:name||"Anonymous",rating:star,review:text,role,date:new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})});}
     catch{setErr("Submit failed — try again.");}
   };
@@ -754,6 +769,8 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
         onFinish(finalTranscript, json); return;
       } catch (err) { console.error(`Report attempt ${attempt+1}:`, err.message); }
     }
+    reportError(new Error("Report generation failed after 2 attempts"), { role, questions: finalTranscript.length });
+    track("report_generation_failed", { questions: finalTranscript.length });
     onFinish(finalTranscript, { overall:0, verdict:"Report could not be generated — please try another interview.", strengths:[], gaps:[], perQuestion:[] });
   };
 
@@ -917,6 +934,7 @@ function Report({ transcript, report, role, onRestart }) {
   const submitRating=async()=>{
     if(!star){setErr("Please select a rating.");return;}
     try{await fetch("/api/ratings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,rating:star,review:rev,role})});
+    track("review_submitted", { rating: star, source: "report" });
     setDone(true);setTimeout(()=>topRef.current?.scrollIntoView({behavior:"smooth"}),300);}
     catch{setErr("Could not submit — try again.");}
   };
