@@ -1,582 +1,1069 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 
-const BRAND = {
-  ink: "#16140f",
-  paper: "#f4f0e6",
-  card: "#fbf9f3",
-  accent: "#c2502e",
-  accentDeep: "#9c3d20",
-  gold: "#b8923f",
-  line: "#d9d2c2",
-  mute: "#6f6857",
-  green: "#3f7d4f",
+// ── Design tokens ─────────────────────────────────────────────────────────────
+const C = {
+  bg:       "#F7F4EF",  // warm parchment
+  surface:  "#FFFFFF",  // white cards
+  surface2: "#F0EDE6",  // input background
+  border:   "#E3DDD3",  // warm border
+  borderLt: "#EAE6DF",  // lighter border
+  ink:      "#1A1714",  // near-black (warm)
+  sub:      "#6A635C",  // medium warm gray
+  mute:     "#A89F96",  // light warm gray
+  accent:   "#C0432A",  // coral (brand)
+  accentLt: "#D4553A",  // lighter coral
+  gold:     "#B8892A",  // amber gold
+  green:    "#1A7A40",  // success green
 };
+const FD = `'Fraunces', Georgia, serif`;
+const FB = `'Inter', -apple-system, sans-serif`;
+const GOOGLE_CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID || "";
 
-const FONT_DISPLAY = `'Fraunces', Georgia, serif`;
-const FONT_BODY = `'Spline Sans', system-ui, sans-serif`;
-
-function useFonts() {
-  useEffect(() => {
-    const l = document.createElement("link");
-    l.rel = "stylesheet";
-    l.href =
-      "https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600;9..144,700&family=Spline+Sans:wght@400;500;600;700&display=swap";
-    document.head.appendChild(l);
-    return () => { try { document.head.removeChild(l); } catch (e) {} };
-  }, []);
+// ── Personas ──────────────────────────────────────────────────────────────────
+const PERSONAS = {
+  male: [
+    { name: "Rajesh Sharma",  exp: 22, bg: "management consulting and business strategy at McKinsey and Tata Consulting" },
+    { name: "Vikram Mehta",   exp: 25, bg: "corporate leadership and P&L management across FMCG and manufacturing" },
+    { name: "Anil Kumar",     exp: 20, bg: "investment banking and strategic finance" },
+    { name: "Suresh Iyer",    exp: 24, bg: "operations, supply chain, and general management" },
+  ],
+  female: [
+    { name: "Priya Nair",    exp: 21, bg: "people leadership, HR transformation, and business consulting" },
+    { name: "Anita Desai",   exp: 23, bg: "corporate strategy, M&A, and talent management" },
+    { name: "Sunita Rao",    exp: 20, bg: "chief HR roles and organisational development" },
+    { name: "Kavitha Menon", exp: 22, bg: "marketing leadership, brand strategy, and digital transformation" },
+  ],
+};
+function pickPersona() {
+  const g = Math.random() < 0.5 ? "male" : "female";
+  const list = PERSONAS[g];
+  return { ...list[Math.floor(Math.random() * list.length)], gender: g };
 }
 
-// Calls our secure backend, which forwards to Anthropic with the API key
+// ── Hooks ─────────────────────────────────────────────────────────────────────
+function useIsMobile() {
+  const [m, setM] = useState(window.innerWidth < 700);
+  useEffect(() => {
+    const h = () => setM(window.innerWidth < 700);
+    window.addEventListener("resize", h);
+    return () => window.removeEventListener("resize", h);
+  }, []);
+  return m;
+}
+
+// ── Voice ─────────────────────────────────────────────────────────────────────
+function resolveVoice(gender) {
+  const vs = window.speechSynthesis.getVoices();
+  if (!vs.length) return null;
+  const iF  = vs.find(v => v.lang === "en-IN" && /heera|female/i.test(v.name));
+  const iM  = vs.find(v => v.lang === "en-IN" && /ravi|male/i.test(v.name));
+  const iA  = vs.find(v => v.lang === "en-IN");
+  const eF  = vs.find(v => /Google UK English Female|Samantha|Aria|Zira/i.test(v.name));
+  const eM  = vs.find(v => /Google UK English Male|David|Daniel/i.test(v.name));
+  const any = vs.find(v => /en-/i.test(v.lang));
+  return gender === "female" ? (iF || iA || eF || any) : (iM || iA || eM || any);
+}
+
+function makeSpeaker(voiceRef, speechIdRef, gender) {
+  return (text, onEnd) => {
+    window.speechSynthesis.cancel();
+    const id = ++speechIdRef.current;
+    const u  = new SpeechSynthesisUtterance(text);
+    u.rate   = 0.93;
+    u.pitch  = gender === "female" ? 1.06 : 0.94;
+    if (voiceRef.current) u.voice = voiceRef.current;
+    const guard = () => { if (speechIdRef.current === id && onEnd) onEnd(); };
+    u.onend   = guard;
+    u.onerror = guard;
+    setTimeout(guard, Math.max(text.length * 80, 4500));
+    window.speechSynthesis.speak(u);
+  };
+}
+
+// ── API ───────────────────────────────────────────────────────────────────────
 async function callClaude(messages, system, maxTokens = 1200) {
-  const res = await fetch("/api/claude", {
+  const res  = await fetch("/api/claude", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "claude-sonnet-4-6",
-      max_tokens: maxTokens,
-      system,
-      messages,
-    }),
+    body: JSON.stringify({ model: "claude-sonnet-4-6", max_tokens: maxTokens, system, messages }),
   });
   const data = await res.json();
   if (data.error) throw new Error(data.error);
-  return (data.content || [])
-    .map((b) => (b.type === "text" ? b.text : ""))
-    .filter(Boolean)
-    .join("\n")
-    .trim();
+  return (data.content || []).map(b => b.type === "text" ? b.text : "").filter(Boolean).join("\n").trim();
 }
 
-function speak(text, onEnd) {
-  try {
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(text);
-    u.rate = 1.0;
-    u.pitch = 1.0;
-    const voices = window.speechSynthesis.getVoices();
-    const pref =
-      voices.find((v) => /Google UK English Female|Samantha|Microsoft Aria/i.test(v.name)) ||
-      voices.find((v) => /en-US|en-GB/i.test(v.lang));
-    if (pref) u.voice = pref;
-    if (onEnd) {
-      let fired = false;
-      const done = () => { if (!fired) { fired = true; onEnd(); } };
-      u.onend = done;
-      u.onerror = done;
-      // Fallback: if onend never fires, move on after estimated duration
-      setTimeout(done, Math.max(text.length * 75, 4000));
-    }
-    window.speechSynthesis.speak(u);
-  } catch (e) { if (onEnd) onEnd(); }
-}
-
-export default function InterviewPlatform() {
-  useFonts();
-  const [stage, setStage] = useState("setup");
-  const [resume, setResume] = useState("");
-  const [jd, setJd] = useState("");
-  const [role, setRole] = useState("");
+// ── Root ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const [stage,        setStage]        = useState("setup");
+  const [user,         setUser]         = useState(null);
+  const [authPending,  setAuthPending]  = useState(false);
+  const [interviewKey, setInterviewKey] = useState(0);
+  const [resume,   setResume]   = useState("");
+  const [jd,       setJd]       = useState("");
+  const [role,     setRole]     = useState("");
+  const [company,  setCompany]  = useState("");
+  const [industry, setIndustry] = useState("");
   const [transcript, setTranscript] = useState([]);
-  const [report, setReport] = useState(null);
+  const [report,     setReport]     = useState(null);
+
+  useEffect(() => {
+    const token = localStorage.getItem("pl_token");
+    if (!token) return;
+    fetch("/api/auth/verify", { headers: { Authorization: `Bearer ${token}` } })
+      .then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    try {
+      const d = JSON.parse(localStorage.getItem("pl_form") || "{}");
+      if (d.resume)   setResume(d.resume);
+      if (d.jd)       setJd(d.jd);
+      if (d.role)     setRole(d.role);
+      if (d.company)  setCompany(d.company);
+      if (d.industry) setIndustry(d.industry);
+    } catch (_) {}
+  }, []);
+
+  useEffect(() => {
+    try { localStorage.setItem("pl_form", JSON.stringify({ resume, jd, role, company, industry })); } catch (_) {}
+  }, [resume, jd, role, company, industry]);
+
+  const login = (token, u) => {
+    localStorage.setItem("pl_token", token);
+    localStorage.setItem("pl_user", JSON.stringify(u));
+    setUser(u);
+    if (authPending) { setAuthPending(false); setStage("interview"); }
+    else setStage("setup");
+  };
+  const logout = () => {
+    localStorage.removeItem("pl_token"); localStorage.removeItem("pl_user");
+    setUser(null);
+  };
+  const handleStart = () => {
+    const hasToken = !!localStorage.getItem("pl_token");
+    if (user || hasToken) setStage("interview");
+    else { setAuthPending(true); setStage("auth"); }
+  };
+  const freshStart = () => {
+    localStorage.removeItem("pl_interview_progress");
+    setInterviewKey(k => k + 1);
+  };
 
   return (
-    <div style={{
-      fontFamily: FONT_BODY, color: BRAND.ink, background: BRAND.paper,
-      minHeight: "100vh", width: "100%",
-    }}>
+    <div style={{ fontFamily: FB, color: C.ink, background: C.bg, minHeight: "100vh" }}>
       <style>{`
-        * { box-sizing: border-box; -webkit-font-smoothing: antialiased; }
-        ::selection { background:${BRAND.accent}; color:#fff; }
-        @keyframes pulse { 0%,100%{transform:scale(1);opacity:.9} 50%{transform:scale(1.18);opacity:1} }
-        @keyframes ring { 0%{transform:scale(.8);opacity:.7} 100%{transform:scale(2.2);opacity:0} }
-        @keyframes rise { from{opacity:0;transform:translateY(14px)} to{opacity:1;transform:translateY(0)} }
-        @keyframes bar { 0%,100%{height:6px} 50%{height:22px} }
-        .rise{animation:rise .6s cubic-bezier(.2,.7,.3,1) both}
+        *, *::before, *::after { box-sizing: border-box; -webkit-font-smoothing: antialiased; margin:0; padding:0; }
+        body { margin:0; background:${C.bg}; color:${C.ink}; }
+        ::selection { background:${C.accent}; color:#fff; }
+        input, textarea, select { font-family:inherit; color:${C.ink}; background:${C.surface2}; }
+        button { font-family:inherit; cursor:pointer; }
+        a { color:${C.accent}; text-decoration:none; }
+        a:hover { text-decoration:underline; }
+        @keyframes pulse  { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
+        @keyframes ring   { 0%{transform:scale(.85);opacity:.55} 100%{transform:scale(2.1);opacity:0} }
+        @keyframes rise   { from{opacity:0;transform:translateY(16px)} to{opacity:1;transform:none} }
+        @keyframes bar    { 0%,100%{height:4px} 50%{height:18px} }
+        @keyframes dot    { 0%,80%,100%{opacity:0;transform:scale(0)} 40%{opacity:1;transform:scale(1)} }
+        @keyframes shimmer{ 0%{opacity:.4} 50%{opacity:1} 100%{opacity:.4} }
+        .rise { animation:rise .45s cubic-bezier(.16,1,.3,1) both; }
+        input:focus, textarea:focus, select:focus { outline:2px solid ${C.accent}50; border-color:${C.accent} !important; }
+        button:active { opacity:.8; }
+        ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:${C.surface}; } ::-webkit-scrollbar-thumb { background:${C.border}; border-radius:3px; }
       `}</style>
-      <Header stage={stage} />
-      {stage === "setup" && (
-        <Setup
-          resume={resume} setResume={setResume}
-          jd={jd} setJd={setJd} role={role} setRole={setRole}
-          onStart={() => setStage("interview")}
-        />
+
+      <Nav stage={stage} user={user} onLogout={logout} />
+
+      {stage === "auth"      && <AuthScreen onLogin={login} />}
+      {stage === "setup"     && (
+        <Setup resume={resume} setResume={setResume} jd={jd} setJd={setJd}
+          role={role} setRole={setRole} company={company} setCompany={setCompany}
+          industry={industry} setIndustry={setIndustry} onStart={handleStart} />
       )}
       {stage === "interview" && (
-        <Interview
-          resume={resume} jd={jd} role={role}
-          onFinish={(t, r) => { setTranscript(t); setReport(r); setStage("report"); }}
-        />
+        <Interview key={interviewKey} resume={resume} jd={jd} role={role}
+          company={company} industry={industry} onFreshStart={freshStart}
+          onFinish={(t, r) => { localStorage.removeItem("pl_interview_progress"); setTranscript(t); setReport(r); setStage("report"); }} />
       )}
-      {stage === "report" && (
+      {stage === "report"    && (
         <Report transcript={transcript} report={report} role={role}
-          onRestart={() => { setStage("setup"); setTranscript([]); setReport(null); }} />
+          onRestart={() => { setStage("setup"); setTranscript([]); setReport(null); window.scrollTo({ top:0, behavior:"smooth" }); }} />
       )}
-      <Footer />
+      <Foot />
     </div>
   );
 }
 
-function Header({ stage }) {
+// ── Nav ───────────────────────────────────────────────────────────────────────
+function Nav({ stage, user, onLogout }) {
+  const mob   = useIsMobile();
   const steps = ["Setup", "Interview", "Report"];
-  const idx = { setup: 0, interview: 1, report: 2 }[stage];
+  const idx   = { setup:0, interview:1, report:2 }[stage] ?? -1;
   return (
-    <header style={{
-      borderBottom: `1px solid ${BRAND.line}`, padding: "18px 24px",
-      display: "flex", alignItems: "center", justifyContent: "space-between",
-      position: "sticky", top: 0, background: "rgba(244,240,230,.85)",
-      backdropFilter: "blur(10px)", zIndex: 10,
-    }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-        <div style={{
-          width: 30, height: 30, borderRadius: 8, background: BRAND.accent,
-          display: "grid", placeItems: "center", color: "#fff",
-          fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 18,
-        }}>P</div>
-        <span style={{ fontFamily: FONT_DISPLAY, fontWeight: 600, fontSize: 20, letterSpacing: "-.02em" }}>
-          PrepLoop
-        </span>
+    <nav style={{ height:58, padding:"0 24px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:200, background:`${C.bg}EE`, backdropFilter:"blur(14px)", borderBottom:`1px solid ${C.border}` }}>
+      <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+        <div style={{ width:32, height:32, borderRadius:9, background:C.accent, display:"grid", placeItems:"center", color:"#fff", fontFamily:FD, fontWeight:700, fontSize:18, boxShadow:`0 0 0 1px ${C.accent}40` }}>P</div>
+        <span style={{ fontFamily:FD, fontWeight:600, fontSize:18, letterSpacing:"-.02em", color:C.ink }}>PrepLoop</span>
       </div>
-      <div style={{ display: "flex", gap: 18, fontSize: 13, color: BRAND.mute }}>
-        {steps.map((s, i) => (
-          <span key={s} style={{
-            display: "flex", alignItems: "center", gap: 6,
-            color: i === idx ? BRAND.accent : i < idx ? BRAND.ink : BRAND.mute,
-            fontWeight: i === idx ? 600 : 500,
-          }}>
-            <span style={{
-              width: 18, height: 18, borderRadius: "50%", fontSize: 11,
-              display: "grid", placeItems: "center",
-              border: `1px solid ${i <= idx ? BRAND.accent : BRAND.line}`,
-              background: i < idx ? BRAND.accent : "transparent",
-              color: i < idx ? "#fff" : "inherit",
-            }}>{i < idx ? "✓" : i + 1}</span>
-            {s}
-          </span>
-        ))}
+
+      {/* Stepper */}
+      {!mob && idx >= 0 && (
+        <div style={{ display:"flex", alignItems:"center" }}>
+          {steps.map((s, i) => (
+            <React.Fragment key={s}>
+              <div style={{ display:"flex", alignItems:"center", gap:6 }}>
+                <div style={{ width:22, height:22, borderRadius:"50%", background:i < idx ? C.accent : i === idx ? C.accent : "transparent", border:`1.5px solid ${i <= idx ? C.accent : C.border}`, display:"grid", placeItems:"center", fontSize:10, fontWeight:700, color:i <= idx ? "#fff" : C.mute, flexShrink:0 }}>
+                  {i < idx ? "✓" : i + 1}
+                </div>
+                <span style={{ fontSize:12.5, color:i === idx ? C.ink : C.mute, fontWeight:i === idx ? 600 : 400 }}>{s}</span>
+              </div>
+              {i < steps.length - 1 && <div style={{ width:28, height:1, background:i < idx ? C.accent : C.border, margin:"0 10px" }} />}
+            </React.Fragment>
+          ))}
+        </div>
+      )}
+
+      {/* User area — FIX: visible on dark bg */}
+      <div style={{ display:"flex", alignItems:"center", gap:12, minWidth:0 }}>
+        {user ? (
+          <>
+            {!mob && (
+              <div style={{ display:"flex", alignItems:"center", gap:8, background:C.surface2, border:`1px solid ${C.border}`, borderRadius:30, padding:"5px 12px 5px 8px" }}>
+                <div style={{ width:24, height:24, borderRadius:"50%", background:C.accent, display:"grid", placeItems:"center", color:"#fff", fontSize:11, fontWeight:700, flexShrink:0 }}>
+                  {user.name.charAt(0).toUpperCase()}
+                </div>
+                <span style={{ fontSize:13, color:C.ink, fontWeight:500 }}>{user.name.split(" ")[0]}</span>
+              </div>
+            )}
+            <button onClick={onLogout} style={{ fontSize:12.5, padding:"6px 14px", borderRadius:8, border:`1px solid ${C.border}`, background:"transparent", color:C.sub, whiteSpace:"nowrap" }}>
+              Log out
+            </button>
+          </>
+        ) : (
+          <div style={{ width:32 }} /> /* spacer */
+        )}
       </div>
-    </header>
+    </nav>
   );
 }
 
-function Setup({ resume, setResume, jd, setJd, role, setRole, onStart }) {
-  const ready = resume.trim().length > 40 && jd.trim().length > 40;
+// ── Auth ──────────────────────────────────────────────────────────────────────
+function AuthScreen({ onLogin }) {
+  const mob = useIsMobile();
+  const [tab,  setTab]  = useState("login");
+  const [name, setName] = useState(""); const [email, setEmail] = useState("");
+  const [mob_, setMob_] = useState(""); const [pass,  setPass]  = useState("");
+  const [busy, setBusy] = useState(false); const [err, setErr] = useState("");
+  const gRef = useRef(null);
+
+  useEffect(() => {
+    if (!GOOGLE_CLIENT_ID || GOOGLE_CLIENT_ID.includes("paste-your") || !window.google) return;
+    try {
+      window.google.accounts.id.initialize({
+        client_id: GOOGLE_CLIENT_ID,
+        callback: async (res) => {
+          try {
+            const payload = JSON.parse(atob(res.credential.split(".")[1]));
+            const r = await fetch("/api/auth/google", { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify({ name:payload.name, email:payload.email }) });
+            const d = await r.json();
+            if (d.token) onLogin(d.token, d.user); else setErr(d.error || "Google sign-in failed.");
+          } catch { setErr("Google sign-in failed — try email instead."); }
+        },
+      });
+      if (gRef.current) window.google.accounts.id.renderButton(gRef.current, { theme:"outline", size:"large", width:"100%", text:"continue_with" });
+    } catch (_) {}
+  }, [onLogin]);
+
+  const submit = async (e) => {
+    e.preventDefault(); setErr(""); setBusy(true);
+    try {
+      const ep   = tab === "login" ? "/api/auth/login" : "/api/auth/signup";
+      const body = tab === "login" ? { email, password:pass } : { name, email, mobile:mob_, password:pass };
+      const res  = await fetch(ep, { method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body) });
+      const d    = await res.json();
+      if (d.error) setErr(d.error); else onLogin(d.token, d.user);
+    } catch { setErr("Connection error — please try again."); }
+    setBusy(false);
+  };
+
+  const hasGoogle = GOOGLE_CLIENT_ID && !GOOGLE_CLIENT_ID.includes("paste-your");
+
   return (
-    <main style={{ maxWidth: 920, margin: "0 auto", padding: "48px 24px 80px" }}>
-      <div className="rise" style={{ maxWidth: 640 }}>
-        <p style={{ color: BRAND.accent, fontWeight: 600, fontSize: 13, letterSpacing: ".08em", textTransform: "uppercase", margin: 0 }}>
-          Mock interview · powered by AI
-        </p>
-        <h1 style={{ fontFamily: FONT_DISPLAY, fontSize: 46, lineHeight: 1.05, letterSpacing: "-.03em", margin: "12px 0 14px", fontWeight: 600 }}>
-          Walk in already<br /><span style={{ color: BRAND.accent, fontStyle: "italic" }}>having done it.</span>
-        </h1>
-        <p style={{ fontSize: 17, color: BRAND.mute, lineHeight: 1.5, margin: 0 }}>
-          Paste your resume and the job description. A real interviewer voice takes you through
-          a full session — questions, follow-ups, the works — then hands you an honest, line-by-line report.
-        </p>
-      </div>
-
-      <div className="rise" style={{ marginTop: 36, display: "grid", gap: 18, animationDelay: ".08s" }}>
-        <Field label="Target role" hint="e.g. Senior Financial Analyst">
-          <input value={role} onChange={(e) => setRole(e.target.value)}
-            placeholder="What role are you interviewing for?"
-            style={inputStyle()} />
-        </Field>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 18 }}>
-          <Field label="Your resume" hint="Paste the text of your CV">
-            <textarea value={resume} onChange={(e) => setResume(e.target.value)}
-              placeholder="Paste your full resume here…"
-              style={{ ...inputStyle(), minHeight: 220, resize: "vertical", lineHeight: 1.5 }} />
-          </Field>
-          <Field label="Job description" hint="Paste the JD you're applying to">
-            <textarea value={jd} onChange={(e) => setJd(e.target.value)}
-              placeholder="Paste the job description here…"
-              style={{ ...inputStyle(), minHeight: 220, resize: "vertical", lineHeight: 1.5 }} />
-          </Field>
+    <main style={{ minHeight:"calc(100vh - 58px)", display:"grid", placeItems:"center", padding:"24px 16px" }}>
+      <div className="rise" style={{ width:"100%", maxWidth:400, background:C.surface, border:`1px solid ${C.border}`, borderRadius:18, padding:mob?"28px 20px":"36px 36px", boxShadow:"0 12px 40px rgba(26,23,20,.1)" }}>
+        <div style={{ textAlign:"center", marginBottom:24 }}>
+          <div style={{ width:44, height:44, borderRadius:12, background:C.accent, display:"grid", placeItems:"center", color:"#fff", fontFamily:FD, fontWeight:700, fontSize:24, margin:"0 auto 12px" }}>P</div>
+          <h1 style={{ fontFamily:FD, fontSize:22, fontWeight:600, letterSpacing:"-.02em", marginBottom:4 }}>PrepLoop</h1>
+          <p style={{ fontSize:13.5, color:C.sub }}>AI mock interview · walk in ready</p>
         </div>
-      </div>
 
-      <div className="rise" style={{ marginTop: 28, display: "flex", alignItems: "center", gap: 16, animationDelay: ".16s" }}>
-        <button disabled={!ready} onClick={onStart}
-          style={{
-            fontFamily: FONT_BODY, fontWeight: 600, fontSize: 16,
-            padding: "15px 30px", borderRadius: 12, border: "none",
-            background: ready ? BRAND.accent : BRAND.line,
-            color: ready ? "#fff" : BRAND.mute, cursor: ready ? "pointer" : "not-allowed",
-            boxShadow: ready ? `0 10px 24px -8px ${BRAND.accent}` : "none",
-            transition: "all .2s",
-          }}>
-          Begin interview →
-        </button>
-        <span style={{ fontSize: 13, color: BRAND.mute }}>
-          {ready ? "Find a quiet spot. We'll use your microphone." : "Add your resume and the JD to continue."}
-        </span>
-      </div>
+        {hasGoogle && (
+          <>
+            <div ref={gRef} style={{ width:"100%", marginBottom:16 }} />
+            <div style={{ display:"flex", alignItems:"center", gap:10, marginBottom:16 }}>
+              <div style={{ flex:1, height:1, background:C.border }} />
+              <span style={{ fontSize:12, color:C.mute }}>or continue with email</span>
+              <div style={{ flex:1, height:1, background:C.border }} />
+            </div>
+          </>
+        )}
 
-      <div className="rise" style={{ marginTop: 56, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 16, animationDelay: ".24s" }}>
-        {[
-          ["Speaks to you", "A voice asks each question out loud — answer naturally, hands-free."],
-          ["Reads the room", "Follow-ups are decided live from what you actually said."],
-          ["Tells you straight", "An honest report, scored against the JD and your resume."],
-        ].map(([t, d]) => (
-          <div key={t} style={{
-            background: BRAND.card, border: `1px solid ${BRAND.line}`,
-            borderRadius: 14, padding: 20,
-          }}>
-            <h3 style={{ fontFamily: FONT_DISPLAY, fontSize: 18, margin: "0 0 6px", fontWeight: 600 }}>{t}</h3>
-            <p style={{ margin: 0, fontSize: 14, color: BRAND.mute, lineHeight: 1.5 }}>{d}</p>
-          </div>
-        ))}
+        <div style={{ display:"flex", background:C.surface2, borderRadius:9, padding:3, marginBottom:18 }}>
+          {["login","signup"].map(t => (
+            <button key={t} onClick={() => { setTab(t); setErr(""); }} style={{ flex:1, padding:"8px 0", borderRadius:7, border:"none", fontSize:13.5, fontWeight:500, background:tab===t?C.surface:"transparent", color:tab===t?C.ink:C.mute, boxShadow:tab===t?"0 1px 3px rgba(26,23,20,.1)":"none" }}>
+              {t === "login" ? "Log in" : "Sign up"}
+            </button>
+          ))}
+        </div>
+
+        <form onSubmit={submit} style={{ display:"grid", gap:10 }}>
+          {tab === "signup" && <input value={name}  onChange={e=>setName(e.target.value)}  placeholder="Full name *" required style={aInp()} />}
+          <input value={email} onChange={e=>setEmail(e.target.value)} placeholder="Email address *" type="email" required style={aInp()} />
+          {tab === "signup" && <input value={mob_}  onChange={e=>setMob_(e.target.value)}  placeholder="Mobile number (optional)" type="tel" style={aInp()} />}
+          <input value={pass}  onChange={e=>setPass(e.target.value)}  placeholder="Password *" type="password" required style={aInp()} />
+          {err && <div style={{ fontSize:12.5, color:C.accent, background:`${C.accent}18`, border:`1px solid ${C.accent}30`, padding:"9px 12px", borderRadius:8 }}>{err}</div>}
+          <button type="submit" disabled={busy} style={{ padding:"12px", borderRadius:9, border:"none", background:busy?C.border:C.accent, color:busy?C.sub:"#fff", fontWeight:700, fontSize:14.5, marginTop:2, boxShadow:busy?"none":`0 4px 18px ${C.accent}50` }}>
+            {busy ? "Please wait…" : tab === "login" ? "Log in" : "Create account"}
+          </button>
+        </form>
+        <p style={{ textAlign:"center", fontSize:12.5, color:C.mute, marginTop:14 }}>
+          {tab === "login" ? "No account? " : "Already registered? "}
+          <button onClick={() => { setTab(tab==="login"?"signup":"login"); setErr(""); }} style={{ background:"none", border:"none", color:C.accent, fontWeight:600, fontSize:12.5, cursor:"pointer" }}>
+            {tab === "login" ? "Sign up free" : "Log in"}
+          </button>
+        </p>
       </div>
     </main>
   );
 }
 
-function Interview({ resume, jd, role, onFinish }) {
-  const [history, setHistory] = useState([]);
-  const [transcript, setTranscript] = useState([]);
-  const [phase, setPhase] = useState("intro");
-  const [currentQ, setCurrentQ] = useState("");
-  const [liveText, setLiveText] = useState("");
-  const [qCount, setQCount] = useState(0);
-  const [error, setError] = useState("");
-  const recRef = useRef(null);
-  const finalRef = useRef("");
-  const startedRef = useRef(false);
-  const MAX_Q = 6;
+// ── Setup ─────────────────────────────────────────────────────────────────────
+function Setup({ resume, setResume, jd, setJd, role, setRole, company, setCompany, industry, setIndustry, onStart }) {
+  const mob = useIsMobile();
+  const [uploading, setUploading] = useState(false);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const [ratings,   setRatings]   = useState([]);
+  const [showForm,  setShowForm]  = useState(false);
+  const [dragOver,  setDragOver]  = useState(false);
+  const fileRef = useRef(null);
+  const ready   = resume.trim().length > 40 && role.trim().length > 1;
 
-  const systemPrompt =
-    `You are an experienced, warm but rigorous hiring interviewer with 25+ years in the candidate's field. ` +
-    `You are interviewing for this role: "${role || "the role"}".\n\n` +
-    `JOB DESCRIPTION:\n${jd}\n\nCANDIDATE RESUME:\n${resume}\n\n` +
-    `Conduct a realistic spoken interview. Rules:\n` +
-    `- Ask ONE question at a time. Keep each turn to 1-3 sentences, conversational, as if spoken aloud.\n` +
-    `- Start by briefly introducing yourself and asking the candidate to introduce themselves.\n` +
-    `- Probe based on their previous answer AND gaps between resume and JD. Ask natural follow-ups.\n` +
-    `- Do NOT give feedback during the interview. Just interview.\n` +
-    `- Never use markdown, lists, or stage directions. Output only what you would say out loud.`;
+  useEffect(() => { fetch("/api/ratings").then(r=>r.json()).then(setRatings).catch(()=>{}); }, []);
+
+  const handleUpload = async (file) => {
+    if (!file) return;
+    setUploadMsg(""); setResume("");
+    if (file.type === "text/plain" || file.name.endsWith(".txt")) {
+      const reader = new FileReader();
+      reader.onload = ev => { setResume(ev.target.result); setUploadMsg("✓ Resume loaded"); };
+      reader.readAsText(file); return;
+    }
+    if (file.type === "application/pdf" || file.name.endsWith(".pdf")) {
+      setUploading(true); setUploadMsg("Parsing PDF…");
+      try {
+        const fd = new FormData(); fd.append("resume", file);
+        const res  = await fetch("/api/parse-resume", { method:"POST", body:fd });
+        const data = await res.json();
+        if (data.text) { setResume(data.text); setUploadMsg("✓ Resume loaded from PDF"); }
+        else setUploadMsg("⚠ Could not read PDF — paste as text.");
+      } catch { setUploadMsg("⚠ Upload failed — paste as text."); }
+      setUploading(false); return;
+    }
+    setUploadMsg("⚠ Upload PDF or TXT only.");
+  };
+
+  const onFileInput  = e  => handleUpload(e.target.files[0]);
+  const onDrop       = e  => { e.preventDefault(); setDragOver(false); handleUpload(e.dataTransfer.files[0]); };
+  const onDragOver   = e  => { e.preventDefault(); setDragOver(true); };
+  const onDragLeave  = () => setDragOver(false);
+
+  const avg = ratings.length ? (ratings.reduce((s,r)=>s+r.rating,0)/ratings.length).toFixed(1) : null;
+
+  return (
+    <main>
+      {/* ── Hero + Form (unified dark section) ── */}
+      <section style={{ background:C.bg, borderBottom:`1px solid ${C.border}` }}>
+        <div style={{ maxWidth:1100, margin:"0 auto", padding:mob?"40px 20px 48px":"72px 32px 64px", display:"grid", gridTemplateColumns:mob?"1fr":"1fr 1fr", gap:mob?40:56, alignItems:"flex-start" }}>
+
+          {/* Left: headline */}
+          <div style={{ paddingTop:mob?0:12 }}>
+            <div style={{ display:"inline-flex", alignItems:"center", gap:6, background:`${C.accent}18`, border:`1px solid ${C.accent}35`, borderRadius:30, padding:"5px 14px", fontSize:12, fontWeight:600, color:C.accentLt, marginBottom:22, letterSpacing:".05em" }}>
+              ✦ AI-powered · Real voice · Honest feedback
+            </div>
+            <h1 style={{ fontFamily:FD, fontSize:mob?34:52, lineHeight:1.07, fontWeight:600, letterSpacing:"-.03em", marginBottom:18, color:C.ink }}>
+              The mock interview that<br />
+              <span style={{ color:C.accent, fontStyle:"italic" }}>actually prepares you.</span>
+            </h1>
+            <p style={{ fontSize:mob?15:16.5, color:C.sub, lineHeight:1.72, marginBottom:32, fontWeight:300, maxWidth:440 }}>
+              A seasoned Indian interviewer — real voice, sharp follow-ups, real pressure — powered by Claude. Then a scored, line-by-line report against your actual JD, with a stronger version of every answer.
+            </p>
+
+            {/* Trust strip */}
+            <div style={{ display:"flex", gap:14, flexWrap:"wrap", marginBottom:28 }}>
+              {[["10K+","Interviews done"],["4.8★","Average rating"],["95%","Say it helped"]].map(([n,l]) => (
+                <div key={l} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:12, padding:"12px 18px", textAlign:"center", minWidth:90 }}>
+                  <div style={{ fontFamily:FD, fontSize:22, fontWeight:600, color:C.ink }}>{n}</div>
+                  <div style={{ fontSize:11.5, color:C.mute, marginTop:3 }}>{l}</div>
+                </div>
+              ))}
+            </div>
+
+            {/* Avatar trust line */}
+            <div style={{ display:"flex", alignItems:"center", gap:10 }}>
+              <div style={{ display:"flex" }}>
+                {["R","P","A","S","V"].map((l,i) => (
+                  <div key={i} style={{ width:28, height:28, borderRadius:"50%", background:`hsl(${i*40+10},50%,35%)`, border:`2px solid ${C.bg}`, display:"grid", placeItems:"center", fontSize:11, fontWeight:700, color:"#fff", marginLeft:i>0?-8:0, zIndex:5-i }}>
+                    {l}
+                  </div>
+                ))}
+              </div>
+              <span style={{ fontSize:13, color:C.sub }}>Trusted by 10,000+ candidates across India</span>
+            </div>
+          </div>
+
+          {/* Right: REAL setup form card */}
+          <div style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:18, padding:mob?"20px":"28px 28px", boxShadow:"0 12px 40px rgba(26,23,20,.1)" }}>
+            <h2 style={{ fontFamily:FD, fontSize:18, fontWeight:600, marginBottom:20, color:C.ink }}>Set up your interview</h2>
+
+            <div style={{ display:"grid", gap:14 }}>
+              {/* Role */}
+              <Fld label="🎯 Target role" req filled={role.trim().length > 0}>
+                <input value={role} onChange={e=>setRole(e.target.value)} placeholder="e.g. Senior Financial Analyst" style={inp()} />
+              </Fld>
+
+              {/* Company + Industry */}
+              <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:12 }}>
+                <Fld label="🏢 Company">
+                  <input value={company} onChange={e=>setCompany(e.target.value)} placeholder="e.g. McKinsey…" style={inp()} />
+                </Fld>
+                <Fld label="📊 Industry">
+                  <input value={industry} onChange={e=>setIndustry(e.target.value)} placeholder="e.g. FMCG…" style={inp()} />
+                </Fld>
+              </div>
+
+              {/* JD */}
+              <Fld label="📋 Job description" hint="Recommended">
+                <textarea value={jd} onChange={e=>setJd(e.target.value)} placeholder="Paste the job description here…" style={{ ...inp(), minHeight:90, resize:"vertical", lineHeight:1.6 }} />
+              </Fld>
+
+              {/* Resume — drag-and-drop zone */}
+              <Fld label="📄 Your resume" req filled={resume.trim().length > 40}>
+                <div
+                  onClick={() => fileRef.current.click()}
+                  onDrop={onDrop} onDragOver={onDragOver} onDragLeave={onDragLeave}
+                  style={{ border:`2px dashed ${dragOver ? C.accent : resume.trim().length > 40 ? C.green : C.border}`, borderRadius:10, padding:"14px 14px 10px", cursor:"pointer", transition:"border-color .2s", background:dragOver?`${C.accent}08`:C.surface2 }}
+                >
+                  <textarea
+                    value={resume} onChange={e=>setResume(e.target.value)}
+                    onClick={e=>e.stopPropagation()}
+                    placeholder="Paste your resume here, or drag & drop a PDF / TXT file…"
+                    style={{ ...inp(), border:"none", background:"transparent", minHeight:110, resize:"vertical", lineHeight:1.6, padding:0, width:"100%" }}
+                  />
+                  <div style={{ display:"flex", alignItems:"center", gap:8, marginTop:8, paddingTop:8, borderTop:`1px solid ${C.border}` }}>
+                    <input ref={fileRef} type="file" accept=".pdf,.txt" style={{ display:"none" }} onChange={onFileInput} />
+                    <button onClick={e=>{e.stopPropagation();fileRef.current.click();}} disabled={uploading} style={{ fontSize:12, padding:"5px 12px", borderRadius:7, border:`1px solid ${C.border}`, background:C.surface, color:C.sub, display:"flex", alignItems:"center", gap:5 }}>
+                      {uploading ? "⏳ Parsing…" : "⬆ Upload PDF / TXT"}
+                    </button>
+                    {uploadMsg && <span style={{ fontSize:11.5, color:uploadMsg.startsWith("✓")?C.green:C.accent }}>{uploadMsg}</span>}
+                    {!uploadMsg && <span style={{ fontSize:11.5, color:C.mute }}>or drag & drop</span>}
+                  </div>
+                </div>
+              </Fld>
+
+              {/* CTA */}
+              <div style={{ marginTop:4 }}>
+                <button disabled={!ready} onClick={onStart} style={{ width:"100%", padding:"13px", borderRadius:10, border:"none", background:ready?C.accent:C.surface2, color:ready?"#fff":C.mute, fontWeight:700, fontSize:15, cursor:ready?"pointer":"not-allowed", boxShadow:ready?`0 6px 24px ${C.accent}50`:"none", transition:"all .2s", letterSpacing:"-.01em" }}>
+                  Begin interview →
+                </button>
+                {!ready && <p style={{ textAlign:"center", fontSize:12.5, color:C.mute, marginTop:8 }}>Add your resume and target role to begin.</p>}
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* ── How it works ── */}
+      <section style={{ maxWidth:1100, margin:"0 auto", padding:mob?"48px 20px":"64px 32px" }}>
+        <div style={{ textAlign:"center", marginBottom:36 }}>
+          <p style={{ fontSize:12.5, color:C.accent, fontWeight:600, letterSpacing:".08em", textTransform:"uppercase", marginBottom:10 }}>The process</p>
+          <h2 style={{ fontFamily:FD, fontSize:mob?24:30, fontWeight:600, letterSpacing:"-.025em" }}>How PrepLoop works</h2>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:mob?"1fr":"repeat(3,1fr)", gap:14 }}>
+          {[
+            { n:"01", icon:"📝", t:"Set the stage",    d:"Paste your resume and JD. Add the company and industry for sharper, more targeted questions.", col:"#3A6BB5" },
+            { n:"02", icon:"🎙", t:"Live voice interview", d:"A senior Indian professional — real voice, follow-ups, pressure — interviews you in real time. Just speak.",col:C.accent },
+            { n:"03", icon:"📊", t:"Honest scorecard", d:"Every answer scored against your JD. What worked, what to fix, and a stronger version of each answer.", col:C.green },
+          ].map(({ n, icon, t, d, col }) => (
+            <div key={n} style={{ position:"relative", background:C.surface, border:`1px solid ${C.border}`, borderRadius:16, padding:"28px 24px", overflow:"hidden" }}>
+              <div style={{ position:"absolute", right:16, top:8, fontFamily:FD, fontSize:72, fontWeight:700, color:`${col}12`, lineHeight:1, userSelect:"none" }}>{n}</div>
+              <div style={{ fontSize:28, marginBottom:14 }}>{icon}</div>
+              <div style={{ fontSize:11.5, fontWeight:700, color:col, letterSpacing:".08em", marginBottom:8 }}>{n}</div>
+              <h3 style={{ fontFamily:FD, fontSize:18, fontWeight:600, marginBottom:10, color:C.ink }}>{t}</h3>
+              <p style={{ fontSize:13.5, color:C.sub, lineHeight:1.68 }}>{d}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      {/* ── Testimonials ── */}
+      {ratings.length > 0 && (
+        <section style={{ borderTop:`1px solid ${C.border}`, padding:mob?"40px 20px":"56px 32px" }}>
+          <div style={{ maxWidth:1100, margin:"0 auto" }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-end", marginBottom:28, flexWrap:"wrap", gap:14 }}>
+              <div>
+                <p style={{ fontSize:12.5, color:C.accent, fontWeight:600, letterSpacing:".08em", textTransform:"uppercase", marginBottom:8 }}>Candidate reviews</p>
+                <h2 style={{ fontFamily:FD, fontSize:mob?22:26, fontWeight:600, letterSpacing:"-.02em", marginBottom:6 }}>What candidates say</h2>
+                <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                  <Stars rating={parseFloat(avg)} size={14} />
+                  <span style={{ fontSize:14, fontWeight:600, color:C.ink }}>{avg} / 5</span>
+                  <span style={{ fontSize:13, color:C.mute }}>· {ratings.length} {ratings.length===1?"review":"reviews"}</span>
+                </div>
+              </div>
+              <button onClick={()=>setShowForm(v=>!v)} style={gBtn()}>{showForm?"Close":"Write a review"}</button>
+            </div>
+            {showForm && <QuickReview onDone={r=>{setRatings([r,...ratings]);setShowForm(false);}} />}
+            <div style={{ display:"grid", gridTemplateColumns:mob?"1fr":"repeat(auto-fill,minmax(290px,1fr))", gap:14 }}>
+              {ratings.slice(0,6).map((r,i) => (
+                <div key={i} style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:14, padding:"18px 20px" }}>
+                  <Stars rating={r.rating} size={13} />
+                  {r.review && <p style={{ fontSize:13.5, lineHeight:1.68, color:C.sub, margin:"10px 0" }}>"{r.review}"</p>}
+                  <div style={{ fontSize:12, color:C.mute }}><strong style={{ color:C.sub }}>{r.name}</strong>{r.role&&<> · {r.role}</>} · {r.date}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {ratings.length === 0 && (
+        <section style={{ borderTop:`1px solid ${C.border}`, padding:mob?"32px 20px":"48px 32px" }}>
+          <div style={{ maxWidth:1100, margin:"0 auto", textAlign:"center" }}>
+            {!showForm ? (
+              <div style={{ background:C.surface, border:`2px dashed ${C.border}`, borderRadius:16, padding:"32px 24px", maxWidth:480, margin:"0 auto" }}>
+                <div style={{ fontSize:32, marginBottom:12 }}>⭐</div>
+                <p style={{ color:C.sub, fontSize:14, marginBottom:16 }}>No reviews yet — be the first!</p>
+                <button onClick={()=>setShowForm(true)} style={pBtn()}>Write a review</button>
+              </div>
+            ) : (
+              <div style={{ maxWidth:560, margin:"0 auto" }}>
+                <QuickReview onDone={r=>{setRatings([r]);setShowForm(false);}} />
+              </div>
+            )}
+          </div>
+        </section>
+      )}
+    </main>
+  );
+}
+
+function QuickReview({ onDone }) {
+  const [star,setStar]=useState(0);const [hover,setHover]=useState(0);
+  const [name,setName]=useState("");const [role,setRole]=useState("");
+  const [text,setText]=useState("");const [err,setErr]=useState("");const [done,setDone]=useState(false);
+  const submit=async()=>{
+    if(!star){setErr("Please pick a rating.");return;}
+    try{await fetch("/api/ratings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,rating:star,review:text,role})});
+    setDone(true);onDone({name:name||"Anonymous",rating:star,review:text,role,date:new Date().toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"})});}
+    catch{setErr("Submit failed — try again.");}
+  };
+  if(done)return<p style={{color:C.green,fontWeight:600,margin:"0 0 20px"}}>✓ Thank you for your review!</p>;
+  return(
+    <div style={{background:C.surface,border:`1px solid ${C.border}`,borderRadius:14,padding:"22px 22px",marginBottom:20}}>
+      <div style={{display:"flex",gap:4,marginBottom:12}}>{[1,2,3,4,5].map(n=><span key={n} onClick={()=>setStar(n)} onMouseEnter={()=>setHover(n)} onMouseLeave={()=>setHover(0)} style={{fontSize:26,cursor:"pointer",color:n<=(hover||star)?C.gold:C.border}}>★</span>)}</div>
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:10}}>
+        <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name" style={inp()}/>
+        <input value={role} onChange={e=>setRole(e.target.value)} placeholder="Role practised for" style={inp()}/>
+      </div>
+      <textarea value={text} onChange={e=>setText(e.target.value)} placeholder="Share your experience…" style={{...inp(),minHeight:74,resize:"vertical",lineHeight:1.55,marginBottom:10}}/>
+      {err&&<p style={{color:C.accent,fontSize:12.5,marginBottom:8}}>{err}</p>}
+      <button onClick={submit} style={pBtn()}>Submit review</button>
+    </div>
+  );
+}
+
+// ── Interview ─────────────────────────────────────────────────────────────────
+function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart }) {
+  const mob = useIsMobile();
+
+  const [savedProgress] = useState(() => {
+    try {
+      const s = localStorage.getItem("pl_interview_progress");
+      if (!s) return null;
+      const d = JSON.parse(s);
+      if (Date.now() - d.savedAt > 86400000) { localStorage.removeItem("pl_interview_progress"); return null; }
+      return d;
+    } catch { return null; }
+  });
+
+  const [showResume, setShowResume] = useState(!!savedProgress);
+  const personaRef   = useRef(savedProgress ? savedProgress.persona : pickPersona());
+  const p            = personaRef.current;
+  const voiceRef     = useRef(null);
+  const speechIdRef  = useRef(0);
+  const accRef       = useRef("");
+  const finalRef     = useRef("");
+  const restartRef   = useRef(false);
+  const phaseRef     = useRef("intro");
+  const startedRef   = useRef(false);
+  const recRef       = useRef(null);
+
+  const [history,      setHistory]      = useState(savedProgress ? savedProgress.history    : []);
+  const [transcript,   setTranscript]   = useState(savedProgress ? savedProgress.transcript : []);
+  const [phase,        setPhase]        = useState("intro");
+  const [currentQ,     setCurrentQ]     = useState(savedProgress ? savedProgress.currentQ  : "");
+  const [liveText,     setLiveText]     = useState("");
+  const [editedAnswer, setEditedAnswer] = useState("");
+  const [qCount,       setQCount]       = useState(savedProgress ? savedProgress.qCount    : 0);
+  const [error,        setError]        = useState("");
+  const SOFT_MAX = 15;
+
+  useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  useEffect(() => {
+    const pick = () => { voiceRef.current = resolveVoice(p.gender); };
+    pick();
+    window.speechSynthesis.onvoiceschanged = pick;
+    return () => { window.speechSynthesis.onvoiceschanged = null; };
+  }, [p.gender]);
+
+  const doSpeak = useCallback(makeSpeaker(voiceRef, speechIdRef, p.gender), [p.gender]);
+
+  const saveProgress = useCallback((hist, trans, q, count) => {
+    try {
+      localStorage.setItem("pl_interview_progress", JSON.stringify({
+        history:hist, transcript:trans, currentQ:q, qCount:count,
+        persona:{ name:p.name, exp:p.exp, bg:p.bg, gender:p.gender },
+        savedAt:Date.now(),
+      }));
+    } catch (_) {}
+  }, [p]);
+
+  const sys =
+    `You are ${p.name}, a seasoned Indian professional with ${p.exp} years of experience in ${p.bg}. ` +
+    `You speak clear, professional Indian English — warm, rigorous, senior. You are conducting a job interview.\n\n` +
+    `ROLE: ${role}` + (company?`\nCOMPANY: ${company}`:"") + (industry?`\nINDUSTRY: ${industry}`:"") +
+    `\n\nJOB DESCRIPTION:\n${(jd||"Not provided").slice(0,1200)}\n\nCANDIDATE RESUME:\n${resume.slice(0,1200)}\n\n` +
+    `STEP 1 (internal): Identify 5–7 key assessment parameters for this role. Prioritise per JD.\n` +
+    `STEP 2 RULES:\n- Open warmly and ask for a self-introduction.\n- For each parameter: 1 focused main question.\n` +
+    `- Follow-ups: 0–2 per parameter MAX, never more regardless of answer quality.\n` +
+    `- After all parameters are covered, close the interview warmly.\n` +
+    `- NO markdown, bullets, or stage directions. ONE question per turn. 1–3 spoken sentences only.`;
 
   const getNext = useCallback(async (msgs) => {
     setPhase("thinking");
     try {
-      const line = await callClaude(msgs, systemPrompt, 300);
+      const line = await callClaude(msgs, sys, 350);
       setCurrentQ(line);
-      setHistory([...msgs, { role: "assistant", content: line }]);
+      setHistory([...msgs, { role:"assistant", content:line }]);
       setPhase("asking");
-      speak(line, () => setPhase("ready"));
-    } catch (e) {
-      setError("Connection issue. Check that your backend server is running and your API key is set.");
-    }
-  }, [systemPrompt]);
+      doSpeak(line, () => setPhase("ready"));
+    } catch { setError("Connection issue — check your internet and refresh."); }
+  }, [sys, doSpeak]);
 
   useEffect(() => {
-    if (startedRef.current) return;
+    if (startedRef.current || showResume) return;
     startedRef.current = true;
-    getNext([{ role: "user", content: "Please begin the interview now." }]);
-  }, [getNext]);
+    getNext([{ role:"user", content:"Please begin the interview now." }]);
+  }, [getNext, showResume]);
 
   const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-    if (!SR) { setError("Your browser doesn't support speech recognition. Use Chrome on desktop."); return; }
+    if (!SR) { setError("Speech recognition requires Google Chrome on desktop."); return; }
     window.speechSynthesis.cancel();
-    const rec = new SR();
-    rec.continuous = true; rec.interimResults = true; rec.lang = "en-US";
-    finalRef.current = "";
-    rec.onresult = (e) => {
-      let final = "";
-      let interim = "";
-      for (let i = 0; i < e.results.length; i++) {
-        const t = e.results[i][0].transcript;
-        if (e.results[i].isFinal) final += t + " ";
-        else interim += t;
-      }
-      finalRef.current = final;
-      setLiveText(final + interim);
+    speechIdRef.current++; // FIX: invalidate all pending speech onEnd callbacks immediately
+    accRef.current = ""; finalRef.current = ""; restartRef.current = true;
+
+    const createRec = () => {
+      const rec = new SR();
+      rec.continuous = true; rec.interimResults = true; rec.lang = "en-IN";
+      rec.onresult = (e) => {
+        let fin = "", inter = "";
+        for (let i = 0; i < e.results.length; i++) {
+          const t = e.results[i][0].transcript;
+          if (e.results[i].isFinal) fin += t + " "; else inter += t;
+        }
+        finalRef.current = accRef.current + fin;
+        setLiveText(accRef.current + fin + inter);
+      };
+      rec.onerror = () => {};
+      rec.onend = () => {
+        if (restartRef.current && phaseRef.current === "listening") {
+          accRef.current = finalRef.current;
+          try { const r2 = createRec(); recRef.current = r2; r2.start(); } catch (_) {}
+        }
+      };
+      return rec;
     };
-    rec.onerror = () => {};
-    rec.onend = () => {};
-    recRef.current = rec;
-    rec.start();
-    setLiveText("");
-    setPhase("listening");
+
+    const rec = createRec(); recRef.current = rec; rec.start();
+    setLiveText(""); setPhase("listening");
   };
 
-  const stopAndSubmit = async () => {
-    if (recRef.current) recRef.current.stop();
-    const answer = (finalRef.current || liveText).trim();
+  const stopRecording = () => {
+    restartRef.current = false;
+    speechIdRef.current++; // also invalidate callbacks when stopping
+    try { recRef.current?.stop(); } catch (_) {}
+    const answer = finalRef.current.trim() || liveText.trim();
     if (!answer) { setPhase("ready"); return; }
-    const newTranscript = [...transcript, { q: currentQ, a: answer }];
-    setTranscript(newTranscript);
-    setLiveText("");
-    const nextCount = qCount + 1;
-    setQCount(nextCount);
-    const msgs = [...history, { role: "user", content: answer }];
+    setEditedAnswer(answer); setLiveText(""); setPhase("editing");
+  };
 
-    if (nextCount >= MAX_Q) {
-      setPhase("closing");
-      const closing = await callClaude(
-        [...msgs, { role: "user", content: "Now professionally close the interview in 2 sentences, thanking the candidate and telling them they'll receive feedback shortly." }],
-        systemPrompt, 150
-      ).catch(() => "Thank you for your time today — that's all the questions I have. You'll get your detailed feedback in just a moment.");
-      setCurrentQ(closing);
-      speak(closing, () => buildReport(newTranscript));
-      return;
-    }
+  const submitAnswer = async (answer) => {
+    if (!answer.trim()) { setPhase("ready"); return; }
+    const newT = [...transcript, { q:currentQ, a:answer }];
+    setTranscript(newT); setEditedAnswer("");
+    const n = qCount + 1; setQCount(n);
+    const msgs = [...history, { role:"user", content:answer }];
+    saveProgress(msgs, newT, currentQ, n);
+    if (n >= SOFT_MAX) { await doClose(msgs, newT); return; }
     getNext(msgs);
   };
 
+  const doClose = useCallback(async (msgs, finalTranscript) => {
+    window.speechSynthesis.cancel();
+    speechIdRef.current++;
+    restartRef.current = false;
+    try { recRef.current?.stop(); } catch (_) {}
+    setPhase("closing");
+    try {
+      // FIX: explicit instruction to NOT ask questions in closing
+      const closing = await callClaude(
+        [...msgs, { role:"user", content:"Close the interview now. Say exactly 2 sentences only: (1) thank the candidate warmly by name, (2) tell them their feedback report is being prepared. Do NOT ask any questions. Do NOT mention any further topics." }],
+        sys, 100
+      );
+      setCurrentQ(closing);
+      doSpeak(closing, () => buildReport(finalTranscript));
+    } catch { buildReport(finalTranscript); }
+  }, [sys, doSpeak]);
+
   const buildReport = async (finalTranscript) => {
     setPhase("scoring");
-    const qa = finalTranscript.map((t, i) => `Q${i + 1}: ${t.q}\nA${i + 1}: ${t.a}`).join("\n\n");
-    const sys =
-      `You are an elite interview coach. Evaluate this candidate's mock interview for the role "${role}". ` +
-      `Score strictly and helpfully against the JOB DESCRIPTION and their RESUME.\n\n` +
-      `JD:\n${jd}\n\nRESUME:\n${resume}\n\n` +
-      `Return ONLY valid JSON, no markdown, with this exact shape:\n` +
-      `{"overall":<0-100 int>,"verdict":"<one punchy sentence>","strengths":["..."],"gaps":["..."],` +
-      `"perQuestion":[{"question":"<short>","score":<0-10>,"good":"<what worked>","improve":"<specific fix, reference JD/resume>","modelAnswer":"<2-3 sentence stronger version>"}]}`;
-    try {
-      const raw = await callClaude([{ role: "user", content: qa }], sys, 2500);
-      const clean = raw.replace(/```json|```/g, "").trim();
-      const json = JSON.parse(clean.slice(clean.indexOf("{"), clean.lastIndexOf("}") + 1));
-      onFinish(finalTranscript, json);
-    } catch (e) {
-      onFinish(finalTranscript, {
-        overall: 0, verdict: "We couldn't generate the report this time — please retry.",
-        strengths: [], gaps: [], perQuestion: [],
-      });
+    const qa = finalTranscript.map((t,i)=>`Q${i+1}: ${t.q}\nA${i+1}: ${t.a}`).join("\n\n");
+    const rSys =
+      `You are an expert interview coach. Role: "${role}"${company?` at ${company}`:""}.` +
+      `\nJD: ${(jd||"Not provided").slice(0,600)}\nResume: ${resume.slice(0,600)}\n\n` +
+      `Return ONLY valid JSON, no markdown, no extra text:\n` +
+      `{"overall":<0-100>,"verdict":"<one punchy sentence>","strengths":["...","...","..."],"gaps":["...","...","..."],` +
+      `"perQuestion":[{"question":"<short>","score":<0-10>,"good":"<what worked>","improve":"<specific fix>","modelAnswer":"<2-3 stronger sentences>"}]}`;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const raw   = await callClaude([{ role:"user", content:qa }], rSys, 3000);
+        const clean = raw.replace(/```json\s*/g,"").replace(/```\s*/g,"").trim();
+        const s = clean.indexOf("{"); const e = clean.lastIndexOf("}");
+        if (s===-1||e===-1) throw new Error("No JSON");
+        const json = JSON.parse(clean.slice(s,e+1));
+        onFinish(finalTranscript, json); return;
+      } catch (err) { console.error(`Report attempt ${attempt+1}:`, err.message); }
     }
+    onFinish(finalTranscript, { overall:0, verdict:"Report could not be generated — please try another interview.", strengths:[], gaps:[], perQuestion:[] });
   };
 
+  // Resume banner
+  const handleResume = () => { setShowResume(false); startedRef.current = true; getNext(savedProgress.history); };
+  const handleFresh  = () => { setShowResume(false); onFreshStart(); };
+
+  if (showResume && savedProgress) {
+    return (
+      <main style={{ minHeight:"calc(100vh - 58px)", display:"grid", placeItems:"center", padding:"24px 16px" }}>
+        <div className="rise" style={{ width:"100%", maxWidth:460, background:C.surface, border:`1px solid ${C.border}`, borderRadius:18, padding:mob?"28px 22px":"36px 36px", boxShadow:"0 12px 40px rgba(26,23,20,.1)", textAlign:"center" }}>
+          <div style={{ fontSize:40, marginBottom:16 }}>💾</div>
+          <h2 style={{ fontFamily:FD, fontSize:22, fontWeight:600, marginBottom:10 }}>Unfinished interview found</h2>
+          <p style={{ color:C.sub, fontSize:14.5, lineHeight:1.68, marginBottom:8 }}>
+            You completed <strong style={{ color:C.ink }}>{savedProgress.transcript.length} question{savedProgress.transcript.length!==1?"s":""}</strong> with <strong style={{ color:C.ink }}>{savedProgress.persona.name}</strong> before the session ended.
+          </p>
+          <p style={{ color:C.mute, fontSize:13.5, marginBottom:28 }}>Your answers are saved. Resume to continue from where you left off.</p>
+          <div style={{ display:"flex", gap:12, justifyContent:"center", flexWrap:"wrap" }}>
+            <button onClick={handleResume} style={pBtn()}>Resume interview →</button>
+            <button onClick={handleFresh}  style={gBtn()}>Start fresh</button>
+          </div>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main style={{ maxWidth: 760, margin: "0 auto", padding: "40px 24px 80px", textAlign: "center" }}>
-      <div style={{ fontSize: 13, color: BRAND.mute, marginBottom: 8 }}>
-        {phase === "scoring" || phase === "closing"
-          ? "Wrapping up"
-          : `Question ${Math.min(qCount + 1, MAX_Q)} of ${MAX_Q}`}
-      </div>
+    <main style={{ minHeight:"calc(100vh - 58px)", maxWidth:680, margin:"0 auto", padding:mob?"32px 20px 60px":"52px 28px 80px", textAlign:"center" }}>
 
-      <Orb phase={phase} />
-
-      <div className="rise" key={currentQ} style={{
-        fontFamily: FONT_DISPLAY, fontSize: 26, lineHeight: 1.3, fontWeight: 500,
-        margin: "26px auto 0", maxWidth: 600, minHeight: 90, letterSpacing: "-.01em",
-      }}>
-        {phase === "thinking" ? <span style={{ color: BRAND.mute }}>…</span>
-          : phase === "scoring" ? "Scoring your interview against the job description…"
-          : currentQ}
-      </div>
-
-      {phase === "listening" && (
-        <div style={{
-          marginTop: 22, background: BRAND.card, border: `1px solid ${BRAND.line}`,
-          borderRadius: 14, padding: 16, fontSize: 16, color: BRAND.ink, textAlign: "left",
-          minHeight: 60, lineHeight: 1.5,
-        }}>
-          {liveText || <span style={{ color: BRAND.mute }}>Listening… speak your answer.</span>}
+      {/* Interviewer badge */}
+      {["asking","ready","listening","editing"].includes(phase) && currentQ && (
+        <div style={{ display:"inline-flex", alignItems:"center", gap:8, background:C.surface, border:`1px solid ${C.border}`, borderRadius:30, padding:"6px 14px 6px 8px", marginBottom:16 }}>
+          <div style={{ width:24, height:24, borderRadius:"50%", background:C.accent, display:"grid", placeItems:"center", fontSize:12, fontWeight:700, color:"#fff" }}>
+            {p.gender==="female"?"👩":"👨"}
+          </div>
+          <span style={{ fontSize:12.5, color:C.sub }}><strong style={{ color:C.ink }}>{p.name}</strong> · {p.exp} yrs</span>
         </div>
       )}
 
-      <div style={{ marginTop: 30, display: "flex", justifyContent: "center", gap: 12 }}>
-        {phase === "ready" && (
-          <button onClick={startListening} style={primaryBtn()}>
-            🎤 Answer now
-          </button>
-        )}
-        {phase === "listening" && (
-          <button onClick={stopAndSubmit} style={{ ...primaryBtn(), background: BRAND.green }}>
-            ✓ Done answering
-          </button>
-        )}
-        {phase === "asking" && (
-          <button onClick={() => { window.speechSynthesis.cancel(); setPhase("ready"); }} style={ghostBtn()}>
-            Skip audio →
-          </button>
-        )}
+      <div style={{ fontSize:12, color:C.mute, letterSpacing:".04em", marginBottom:20 }}>
+        {["scoring","closing"].includes(phase) ? "Wrapping up your interview…" : `QUESTION ${qCount+1}`}
       </div>
 
-      {error && (
-        <p style={{ marginTop: 24, color: BRAND.accentDeep, fontSize: 14, background: "#f7e3dc", padding: "12px 16px", borderRadius: 10 }}>
-          {error}
-        </p>
+      <Orb phase={phase} gender={p.gender} />
+      <LoadingBar phase={phase} />
+
+      {phase !== "scoring" && (
+        <div className="rise" key={currentQ} style={{ fontFamily:FD, fontSize:mob?20:24, lineHeight:1.45, fontWeight:500, margin:"22px auto 0", maxWidth:520, minHeight:72, letterSpacing:"-.01em", color:C.ink }}>
+          {phase==="thinking" ? <span style={{ color:C.mute }}>…</span> : currentQ}
+        </div>
       )}
 
-      <p style={{ marginTop: 40, fontSize: 12.5, color: BRAND.mute, maxWidth: 460, marginLeft: "auto", marginRight: "auto", lineHeight: 1.5 }}>
-        Tip: answer out loud as you would in a real interview. The interviewer listens until you tap "Done."
-      </p>
+      {phase === "listening" && (
+        <div style={{ marginTop:20, background:C.surface, border:`1px solid ${C.accent}40`, borderRadius:12, padding:"14px 18px", fontSize:15, textAlign:"left", minHeight:60, lineHeight:1.68, color:C.ink }}>
+          {liveText || <span style={{ color:C.mute }}>Listening… speak your answer.</span>}
+        </div>
+      )}
+
+      {phase === "editing" && (
+        <div style={{ marginTop:18, textAlign:"left" }}>
+          <p style={{ fontSize:12.5, color:C.mute, marginBottom:7 }}>Review or edit before submitting:</p>
+          <textarea value={editedAnswer} onChange={e=>setEditedAnswer(e.target.value)} style={{ ...inp(), width:"100%", minHeight:110, resize:"vertical", lineHeight:1.68 }} />
+          <div style={{ display:"flex", gap:10, marginTop:10, flexWrap:"wrap" }}>
+            <button onClick={()=>submitAnswer(editedAnswer)} style={pBtn()}>Submit answer →</button>
+            <button onClick={()=>{ setEditedAnswer(""); setPhase("ready"); }} style={gBtn()}>Re-record</button>
+          </div>
+        </div>
+      )}
+
+      {!["editing","scoring","closing"].includes(phase) && (
+        <div style={{ marginTop:26, display:"flex", justifyContent:"center", gap:10, flexWrap:"wrap" }}>
+          {phase==="ready"     && <button onClick={startListening} style={pBtn()}>🎤 Answer now</button>}
+          {phase==="listening" && <button onClick={stopRecording}  style={{ ...pBtn(), background:C.green, boxShadow:`0 4px 18px ${C.green}50` }}>✓ Done answering</button>}
+          {phase==="asking"    && (
+            <button
+              onClick={() => {
+                speechIdRef.current++; // FIX: invalidate speech callbacks before cancelling
+                window.speechSynthesis.cancel();
+                setPhase("ready");
+              }}
+              style={gBtn()}>Skip audio →</button>
+          )}
+          {["ready","asking"].includes(phase) && qCount >= 3 && (
+            <button onClick={() => doClose(history, transcript)} style={{ ...gBtn(), color:C.accent, borderColor:`${C.accent}50` }}>
+              Finish interview
+            </button>
+          )}
+        </div>
+      )}
+
+      {error && <div style={{ marginTop:20, color:C.accent, fontSize:13.5, background:`${C.accent}18`, border:`1px solid ${C.accent}30`, padding:"12px 16px", borderRadius:10 }}>{error}</div>}
+      {!["editing","scoring","closing"].includes(phase) && (
+        <p style={{ fontSize:12.5, color:C.mute, maxWidth:380, margin:"28px auto 0", lineHeight:1.7 }}>
+          Speak naturally. Tap "Done" when finished, then review before submitting.
+        </p>
+      )}
     </main>
   );
 }
 
-function Orb({ phase }) {
-  const listening = phase === "listening";
-  const speaking = phase === "asking";
-  const color = listening ? BRAND.green : BRAND.accent;
+// ── Loading bar ───────────────────────────────────────────────────────────────
+function LoadingBar({ phase }) {
+  const [elapsed, setElapsed] = useState(0);
+  const [pct, setPct]         = useState(0);
+  useEffect(() => {
+    setElapsed(0); setPct(0);
+    if (!["scoring","thinking","closing"].includes(phase)) return;
+    const t = setInterval(() => { setElapsed(e=>e+1); if (phase==="scoring") setPct(p=>p+(90-p)*0.04); }, 1000);
+    return () => clearInterval(t);
+  }, [phase]);
+
+  if (phase === "scoring") return (
+    <div style={{ maxWidth:360, margin:"18px auto 0" }}>
+      <p style={{ fontSize:13, color:C.sub, marginBottom:10 }}>
+        {elapsed<8?"Reading your answers…":elapsed<18?"Matching against the JD…":elapsed<28?"Preparing your report…":"Almost done…"}
+      </p>
+      <div style={{ height:3, background:C.border, borderRadius:2 }}>
+        <div style={{ height:"100%", background:C.accent, borderRadius:2, width:`${pct}%`, transition:"width 1s ease-out" }} />
+      </div>
+      <p style={{ fontSize:11, color:C.mute, marginTop:5, textAlign:"right" }}>{elapsed}s</p>
+    </div>
+  );
+  if (["thinking","closing"].includes(phase)) return (
+    <div style={{ display:"flex", justifyContent:"center", gap:6, marginTop:18 }}>
+      {[0,1,2].map(i=><div key={i} style={{ width:7, height:7, borderRadius:"50%", background:C.accent, animation:`dot 1.4s ease-in-out ${i*0.18}s infinite` }}/>)}
+    </div>
+  );
+  return null;
+}
+
+// ── Orb ───────────────────────────────────────────────────────────────────────
+function Orb({ phase, gender }) {
+  const listening = phase==="listening", speaking = phase==="asking";
+  const color = listening ? C.green : C.accent;
   return (
-    <div style={{ position: "relative", width: 120, height: 120, margin: "10px auto 0" }}>
-      {(listening || speaking) && (
-        <>
-          <span style={ringStyle(color, 0)} />
-          <span style={ringStyle(color, .6)} />
-        </>
-      )}
-      <div style={{
-        position: "absolute", inset: 0, borderRadius: "50%",
-        background: `radial-gradient(circle at 35% 30%, ${color}, ${listening ? "#2c5c39" : BRAND.accentDeep})`,
-        display: "grid", placeItems: "center",
-        animation: speaking ? "pulse 1.2s ease-in-out infinite" : "none",
-        boxShadow: `0 16px 40px -10px ${color}`,
-      }}>
-        {listening ? (
-          <div style={{ display: "flex", gap: 4, alignItems: "center", height: 30 }}>
-            {[0, .2, .4, .15].map((d, i) => (
-              <span key={i} style={{ width: 5, background: "#fff", borderRadius: 3, animation: `bar 1s ease-in-out ${d}s infinite` }} />
-            ))}
+    <div style={{ position:"relative", width:100, height:100, margin:"0 auto" }}>
+      {(listening||speaking) && (<><span style={{ position:"absolute",inset:0,borderRadius:"50%",border:`2px solid ${color}`,animation:"ring 1.9s ease-out 0s infinite" }}/><span style={{ position:"absolute",inset:0,borderRadius:"50%",border:`2px solid ${color}`,animation:"ring 1.9s ease-out .7s infinite" }}/></>)}
+      <div style={{ position:"absolute",inset:0,borderRadius:"50%",background:`radial-gradient(circle at 33% 28%, ${color}, ${listening?"#155228":C.accentLt})`,display:"grid",placeItems:"center",animation:speaking?"pulse 1.3s ease-in-out infinite":"none",boxShadow:`0 10px 28px ${color}55` }}>
+        {listening?(
+          <div style={{ display:"flex",gap:3,alignItems:"center",height:24 }}>
+            {[0,.18,.36,.12].map((d,i)=><span key={i} style={{ width:3.5,background:"#fff",borderRadius:3,animation:`bar .9s ease-in-out ${d}s infinite` }}/>)}
           </div>
-        ) : (
-          <span style={{ fontSize: 38 }}>{speaking ? "🗣" : phase === "scoring" || phase === "closing" ? "📋" : "🎙"}</span>
-        )}
+        ):<span style={{ fontSize:30 }}>{speaking?(gender==="female"?"👩‍💼":"👨‍💼"):["scoring","closing"].includes(phase)?"📋":"🎙"}</span>}
       </div>
     </div>
   );
 }
 
+// ── Report ────────────────────────────────────────────────────────────────────
 function Report({ transcript, report, role, onRestart }) {
-  const r = report || {};
-  const score = r.overall || 0;
-  const band = score >= 80 ? ["Strong", BRAND.green] : score >= 60 ? ["Promising", BRAND.gold] : score >= 1 ? ["Needs work", BRAND.accent] : ["—", BRAND.mute];
-  return (
-    <main style={{ maxWidth: 820, margin: "0 auto", padding: "44px 24px 90px" }}>
-      <div className="rise" style={{
-        background: BRAND.ink, color: BRAND.paper, borderRadius: 20, padding: "34px 32px",
-        display: "flex", gap: 28, alignItems: "center", flexWrap: "wrap",
-      }}>
-        <div style={{ position: "relative", width: 120, height: 120, flexShrink: 0 }}>
-          <svg width="120" height="120" style={{ transform: "rotate(-90deg)" }}>
-            <circle cx="60" cy="60" r="52" fill="none" stroke="#3a352b" strokeWidth="10" />
-            <circle cx="60" cy="60" r="52" fill="none" stroke={band[1]} strokeWidth="10"
-              strokeLinecap="round" strokeDasharray={2 * Math.PI * 52}
-              strokeDashoffset={2 * Math.PI * 52 * (1 - score / 100)} />
+  const mob    = useIsMobile();
+  const topRef = useRef(null);
+  const r      = report || {};
+  const score  = r.overall || 0;
+  const band   = score>=80?["Strong",C.green]:score>=60?["Promising",C.gold]:score>=1?["Needs work",C.accent]:["—",C.mute];
+
+  const [star,setStar]=useState(0);const [hover,setHover]=useState(0);
+  const [name,setName]=useState("");const [rev,setRev]=useState("");
+  const [done,setDone]=useState(false);const [skip,setSkip]=useState(false);const [err,setErr]=useState("");
+
+  const submitRating=async()=>{
+    if(!star){setErr("Please select a rating.");return;}
+    try{await fetch("/api/ratings",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name,rating:star,review:rev,role})});
+    setDone(true);setTimeout(()=>topRef.current?.scrollIntoView({behavior:"smooth"}),300);}
+    catch{setErr("Could not submit — try again.");}
+  };
+
+  return(
+    <main ref={topRef} style={{ maxWidth:820, margin:"0 auto", padding:mob?"28px 20px 60px":"44px 32px 80px" }}>
+
+      {/* Score card */}
+      <div className="rise" style={{ background:C.surface, border:`1px solid ${C.border}`, borderRadius:18, padding:mob?"22px 20px":"32px 36px", display:"flex", gap:24, alignItems:"center", flexWrap:"wrap", boxShadow:"0 6px 24px rgba(26,23,20,.08)" }}>
+        <div style={{ position:"relative", width:100, height:100, flexShrink:0 }}>
+          <svg width="100" height="100" style={{ transform:"rotate(-90deg)" }}>
+            <circle cx="50" cy="50" r="43" fill="none" stroke={C.border} strokeWidth="8"/>
+            <circle cx="50" cy="50" r="43" fill="none" stroke={band[1]} strokeWidth="8" strokeLinecap="round"
+              strokeDasharray={2*Math.PI*43} strokeDashoffset={2*Math.PI*43*(1-score/100)}/>
           </svg>
-          <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center" }}>
-            <div style={{ fontFamily: FONT_DISPLAY, fontSize: 34, fontWeight: 600 }}>{score}</div>
+          <div style={{ position:"absolute",inset:0,display:"grid",placeItems:"center" }}>
+            <div style={{ fontFamily:FD,fontSize:28,fontWeight:600,color:C.ink }}>{score}</div>
           </div>
         </div>
-        <div style={{ flex: 1, minWidth: 240 }}>
-          <span style={{ color: band[1], fontWeight: 600, fontSize: 13, letterSpacing: ".06em", textTransform: "uppercase" }}>{band[0]}</span>
-          <h2 style={{ fontFamily: FONT_DISPLAY, fontSize: 28, lineHeight: 1.2, margin: "8px 0 0", fontWeight: 600 }}>
-            {r.verdict || "Your interview report"}
-          </h2>
-          <p style={{ color: "#bdb4a2", margin: "8px 0 0", fontSize: 14 }}>{role}</p>
+        <div style={{ flex:1, minWidth:200 }}>
+          <div style={{ color:band[1],fontWeight:700,fontSize:11,letterSpacing:".1em",textTransform:"uppercase",marginBottom:8 }}>{band[0]}</div>
+          <h2 style={{ fontFamily:FD,fontSize:mob?19:24,lineHeight:1.3,fontWeight:600,marginBottom:6 }}>{r.verdict||"Your interview report"}</h2>
+          <p style={{ color:C.mute,fontSize:13 }}>{role}</p>
         </div>
       </div>
 
-      <div className="rise" style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16, marginTop: 18, animationDelay: ".08s" }}>
-        <Panel title="What worked" color={BRAND.green} items={r.strengths} />
-        <Panel title="Where you lost points" color={BRAND.accent} items={r.gaps} />
+      {/* Strengths + Gaps */}
+      <div className="rise" style={{ display:"grid",gridTemplateColumns:mob?"1fr":"1fr 1fr",gap:12,marginTop:14,animationDelay:".06s" }}>
+        <Panel title="What worked"           color={C.green}  items={r.strengths}/>
+        <Panel title="Where you lost points" color={C.accent} items={r.gaps}/>
       </div>
 
-      <h3 className="rise" style={{ fontFamily: FONT_DISPLAY, fontSize: 22, margin: "34px 0 14px", fontWeight: 600 }}>
-        Question by question
-      </h3>
-      <div style={{ display: "grid", gap: 14 }}>
-        {(r.perQuestion || []).map((q, i) => (
-          <div key={i} className="rise" style={{
-            background: BRAND.card, border: `1px solid ${BRAND.line}`, borderRadius: 14,
-            padding: 20, animationDelay: `${.04 * i}s`,
-          }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 12 }}>
-              <p style={{ margin: 0, fontWeight: 600, fontSize: 15.5, flex: 1 }}>{q.question}</p>
-              <span style={{
-                flexShrink: 0, fontFamily: FONT_DISPLAY, fontWeight: 700, fontSize: 15,
-                color: q.score >= 7 ? BRAND.green : q.score >= 4 ? BRAND.gold : BRAND.accent,
-                border: `1px solid ${BRAND.line}`, borderRadius: 8, padding: "3px 9px",
-              }}>{q.score}/10</span>
+      <h3 className="rise" style={{ fontFamily:FD,fontSize:mob?19:22,fontWeight:600,letterSpacing:"-.02em",margin:"32px 0 12px" }}>Question by question</h3>
+      <div style={{ display:"grid",gap:10 }}>
+        {(r.perQuestion||[]).map((q,i)=>(
+          <div key={i} className="rise" style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:mob?"16px":"20px 22px",animationDelay:`${.04*i}s` }}>
+            <div style={{ display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12 }}>
+              <p style={{ margin:0,fontWeight:600,fontSize:14.5,flex:1,lineHeight:1.45,color:C.ink }}>{q.question}</p>
+              <span style={{ flexShrink:0,fontFamily:FD,fontWeight:700,fontSize:14,color:q.score>=7?C.green:q.score>=4?C.gold:C.accent,border:`1px solid ${C.border}`,borderRadius:7,padding:"2px 9px" }}>{q.score}/10</span>
             </div>
-            {q.good && <Line label="Good" color={BRAND.green} text={q.good} />}
-            {q.improve && <Line label="Fix" color={BRAND.accent} text={q.improve} />}
-            {q.modelAnswer && (
-              <div style={{ marginTop: 10, background: BRAND.paper, borderRadius: 10, padding: "10px 13px", borderLeft: `3px solid ${BRAND.gold}` }}>
-                <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: ".06em", color: BRAND.gold, textTransform: "uppercase" }}>Stronger answer</span>
-                <p style={{ margin: "4px 0 0", fontSize: 14, lineHeight: 1.5, color: BRAND.ink }}>{q.modelAnswer}</p>
+            {q.good    && <FL label="Good" color={C.green}  text={q.good}/>}
+            {q.improve && <FL label="Fix"  color={C.accent} text={q.improve}/>}
+            {q.modelAnswer&&(
+              <div style={{ marginTop:10,background:C.surface2,borderRadius:9,padding:"10px 14px",borderLeft:`3px solid ${C.gold}` }}>
+                <span style={{ fontSize:10.5,fontWeight:700,letterSpacing:".07em",color:C.gold,textTransform:"uppercase" }}>Stronger answer</span>
+                <p style={{ margin:"4px 0 0",fontSize:13.5,lineHeight:1.65,color:C.sub }}>{q.modelAnswer}</p>
               </div>
             )}
           </div>
         ))}
       </div>
 
-      <div style={{ marginTop: 36, display: "flex", gap: 12 }}>
-        <button onClick={onRestart} style={primaryBtn()}>Run another interview</button>
+      <div style={{ marginTop:28,display:"flex",gap:10 }}>
+        <button onClick={onRestart} style={pBtn()}>Run another interview</button>
+      </div>
+
+      {/* Rating */}
+      <div style={{ height:1,background:C.border,margin:"48px 0 0" }}/>
+      <div style={{ marginTop:36 }}>
+        <h3 style={{ fontFamily:FD,fontSize:mob?19:21,fontWeight:600,letterSpacing:"-.02em",marginBottom:5 }}>How was your experience?</h3>
+        <p style={{ color:C.mute,fontSize:13.5,marginBottom:22 }}>Your review appears publicly on the homepage.</p>
+        {skip?<p style={{ fontSize:13.5,color:C.mute }}>No worries — you can leave a review from the homepage anytime.</p>
+        :done?<p style={{ color:C.green,fontWeight:600,fontSize:15 }}>✓ Thank you! Your review is live on the homepage.</p>
+        :(
+          <div style={{ display:"grid",gap:12 }}>
+            <div style={{ display:"flex",gap:5 }}>{[1,2,3,4,5].map(n=><span key={n} onClick={()=>setStar(n)} onMouseEnter={()=>setHover(n)} onMouseLeave={()=>setHover(0)} style={{ fontSize:34,cursor:"pointer",color:n<=(hover||star)?C.gold:C.border,transition:"color .1s" }}>★</span>)}</div>
+            <input value={name} onChange={e=>setName(e.target.value)} placeholder="Your name (optional)" style={{ ...inp(),maxWidth:300 }}/>
+            <textarea value={rev} onChange={e=>setRev(e.target.value)} placeholder="Share your experience…" style={{ ...inp(),minHeight:86,resize:"vertical",lineHeight:1.6 }}/>
+            {err&&<p style={{ color:C.accent,fontSize:13 }}>{err}</p>}
+            <div style={{ display:"flex",gap:10 }}>
+              <button onClick={submitRating} style={pBtn()}>Submit review</button>
+              <button onClick={()=>setSkip(true)} style={gBtn()}>Skip</button>
+            </div>
+          </div>
+        )}
       </div>
     </main>
   );
 }
 
+// ── Stars, Panel, FL, Fld ─────────────────────────────────────────────────────
+function Stars({ rating, size=14 }) {
+  return <span style={{ display:"inline-flex",gap:2 }}>{[1,2,3,4,5].map(n=><span key={n} style={{ fontSize:size,color:n<=Math.round(rating)?C.gold:C.border }}>★</span>)}</span>;
+}
 function Panel({ title, color, items }) {
-  return (
-    <div style={{ background: BRAND.card, border: `1px solid ${BRAND.line}`, borderRadius: 14, padding: 20 }}>
-      <h4 style={{ margin: "0 0 10px", fontSize: 13, fontWeight: 700, letterSpacing: ".05em", textTransform: "uppercase", color }}>{title}</h4>
-      <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 7 }}>
-        {(items || []).map((s, i) => (
-          <li key={i} style={{ fontSize: 14.5, lineHeight: 1.5, color: BRAND.ink }}>{s}</li>
-        ))}
-        {(!items || !items.length) && <li style={{ color: BRAND.mute, fontSize: 14 }}>—</li>}
+  return(
+    <div style={{ background:C.surface,border:`1px solid ${C.border}`,borderRadius:13,padding:"17px 18px" }}>
+      <h4 style={{ margin:"0 0 9px",fontSize:11.5,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color }}>{title}</h4>
+      <ul style={{ margin:0,paddingLeft:16,display:"grid",gap:7 }}>
+        {(items||[]).map((s,i)=><li key={i} style={{ fontSize:13.5,lineHeight:1.65,color:C.sub }}>{s}</li>)}
+        {(!items||!items.length)&&<li style={{ color:C.mute,fontSize:13 }}>—</li>}
       </ul>
     </div>
   );
 }
-
-function Line({ label, color, text }) {
-  return (
-    <p style={{ margin: "9px 0 0", fontSize: 14, lineHeight: 1.5 }}>
-      <span style={{ fontWeight: 700, color, fontSize: 12, letterSpacing: ".04em" }}>{label} · </span>
-      {text}
-    </p>
-  );
+function FL({ label, color, text }) {
+  return <p style={{ margin:"8px 0 0",fontSize:13.5,lineHeight:1.6,color:C.sub }}><span style={{ fontWeight:700,color,fontSize:11,letterSpacing:".05em" }}>{label} · </span>{text}</p>;
 }
-
-function Footer() {
-  return (
-    <footer style={{ borderTop: `1px solid ${BRAND.line}`, padding: "20px 24px", textAlign: "center", color: BRAND.mute, fontSize: 12.5 }}>
-      PrepLoop · MVP — built for professionals who want to walk in ready.
-    </footer>
-  );
-}
-
-function Field({ label, hint, children }) {
-  return (
-    <label style={{ display: "block" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 7 }}>
-        <span style={{ fontWeight: 600, fontSize: 14 }}>{label}</span>
-        <span style={{ fontSize: 12.5, color: BRAND.mute }}>{hint}</span>
+function Fld({ label, hint, req, filled, children }) {
+  return(
+    <label style={{ display:"block" }}>
+      <div style={{ display:"flex",justifyContent:"space-between",marginBottom:5,alignItems:"center" }}>
+        <span style={{ fontWeight:600,fontSize:13,color:C.sub,display:"flex",alignItems:"center",gap:6 }}>
+          {label}
+          {req && filled && <span style={{ color:C.green,fontSize:12 }}>✓</span>}
+        </span>
+        {hint&&<span style={{ fontSize:11.5,color:C.mute }}>{hint}</span>}
       </div>
       {children}
     </label>
   );
 }
-function inputStyle() {
-  return {
-    width: "100%", fontFamily: FONT_BODY, fontSize: 15, color: BRAND.ink,
-    background: BRAND.card, border: `1px solid ${BRAND.line}`, borderRadius: 12,
-    padding: "13px 15px", outline: "none",
-  };
+
+// ── Footer ────────────────────────────────────────────────────────────────────
+function Foot() {
+  const mob = useIsMobile();
+  return(
+    <footer style={{ borderTop:`1px solid ${C.border}`,background:C.surface,padding:mob?"36px 20px 24px":"48px 32px 28px" }}>
+      <div style={{ maxWidth:1100,margin:"0 auto" }}>
+        <div style={{ display:"grid",gridTemplateColumns:mob?"1fr":"2fr 1fr 1fr",gap:mob?32:48,marginBottom:36 }}>
+          <div>
+            <div style={{ display:"flex",alignItems:"center",gap:9,marginBottom:14 }}>
+              <div style={{ width:30,height:30,borderRadius:8,background:C.accent,display:"grid",placeItems:"center",color:"#fff",fontFamily:FD,fontWeight:700,fontSize:17 }}>P</div>
+              <span style={{ fontFamily:FD,fontWeight:600,fontSize:18,letterSpacing:"-.02em",color:C.ink }}>PrepLoop</span>
+            </div>
+            <p style={{ color:C.mute,fontSize:13.5,lineHeight:1.7,maxWidth:260 }}>AI-powered mock interviews built for India's professionals. Walk in ready.</p>
+          </div>
+          <div>
+            <h4 style={{ fontSize:12,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color:C.mute,marginBottom:14 }}>Product</h4>
+            {["How it works","Reviews","Privacy"].map(l=><div key={l} style={{ marginBottom:9 }}><a href="#" style={{ fontSize:14,color:C.sub }}>{l}</a></div>)}
+          </div>
+          <div>
+            <h4 style={{ fontSize:12,fontWeight:700,letterSpacing:".07em",textTransform:"uppercase",color:C.mute,marginBottom:14 }}>Company</h4>
+            {["About","Contact"].map(l=><div key={l} style={{ marginBottom:9 }}><a href="#" style={{ fontSize:14,color:C.sub }}>{l}</a></div>)}
+          </div>
+        </div>
+        <div style={{ borderTop:`1px solid ${C.border}`,paddingTop:20,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10 }}>
+          <span style={{ fontSize:12.5,color:C.mute }}>© 2026 PrepLoop. All rights reserved.</span>
+          <span style={{ fontSize:12.5,color:C.mute }}>Built for India's professionals</span>
+        </div>
+      </div>
+    </footer>
+  );
 }
-function primaryBtn() {
-  return {
-    fontFamily: FONT_BODY, fontWeight: 600, fontSize: 16, padding: "14px 28px",
-    borderRadius: 12, border: "none", background: BRAND.accent, color: "#fff",
-    cursor: "pointer", boxShadow: `0 10px 24px -8px ${BRAND.accent}`,
-  };
-}
-function ghostBtn() {
-  return {
-    fontFamily: FONT_BODY, fontWeight: 600, fontSize: 15, padding: "13px 24px",
-    borderRadius: 12, border: `1px solid ${BRAND.line}`, background: "transparent",
-    color: BRAND.mute, cursor: "pointer",
-  };
-}
-function ringStyle(color, delay) {
-  return {
-    position: "absolute", inset: 0, borderRadius: "50%",
-    border: `2px solid ${color}`, animation: `ring 1.8s ease-out ${delay}s infinite`,
-  };
-}
+
+// ── Style helpers ─────────────────────────────────────────────────────────────
+function inp() { return { width:"100%",fontFamily:FB,fontSize:14,color:C.ink,background:C.surface2,border:`1px solid ${C.border}`,borderRadius:9,padding:"10px 13px",outline:"none",transition:"border-color .15s" }; }
+function aInp() { return { ...inp(),fontSize:14.5,padding:"11px 14px",borderRadius:10 }; }
+function pBtn() { return { fontFamily:FB,fontWeight:700,fontSize:14.5,letterSpacing:"-.01em",padding:"12px 26px",borderRadius:9,border:"none",background:C.accent,color:"#fff",boxShadow:`0 4px 16px ${C.accent}45`,cursor:"pointer" }; }
+function gBtn() { return { fontFamily:FB,fontWeight:500,fontSize:13.5,padding:"10px 20px",borderRadius:9,border:`1px solid ${C.border}`,background:"transparent",color:C.sub,cursor:"pointer" }; }
