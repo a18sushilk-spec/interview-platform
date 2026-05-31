@@ -140,9 +140,13 @@ export default function App() {
   };
   const logout = () => {
     localStorage.removeItem("pl_token"); localStorage.removeItem("pl_user");
+    localStorage.removeItem("pl_form");              // clear cached resume/role of previous user
+    localStorage.removeItem("pl_interview_progress"); // clear saved interview of previous user
     setUser(null);
     track("user_logged_out");
     resetUser();
+    // Stop Google from silently auto-signing the same account back in
+    try { window.google?.accounts?.id?.disableAutoSelect(); } catch (_) {}
   };
   const handleStart = () => {
     const hasToken = !!localStorage.getItem("pl_token");
@@ -620,6 +624,7 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
   const phaseRef     = useRef("intro");
   const startedRef   = useRef(false);
   const recRef       = useRef(null);
+  const recSessionRef = useRef(0); // guards against overlapping recognizers double-writing text
 
   const [history,      setHistory]      = useState(savedProgress ? savedProgress.history    : []);
   const [transcript,   setTranscript]   = useState(savedProgress ? savedProgress.transcript : []);
@@ -684,38 +689,46 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setError("Speech recognition requires Google Chrome on desktop."); return; }
     window.speechSynthesis.cancel();
-    speechIdRef.current++; // FIX: invalidate all pending speech onEnd callbacks immediately
-    accRef.current = ""; finalRef.current = ""; restartRef.current = true;
+    speechIdRef.current++;        // invalidate any pending speech onEnd callbacks
+    finalRef.current = "";        // committed (final) text only — appended once each
+    restartRef.current = true;
+    const session = ++recSessionRef.current; // unique id for THIS listening session
 
     const createRec = () => {
       const rec = new SR();
       rec.continuous = true; rec.interimResults = true; rec.lang = "en-IN";
       rec.onresult = (e) => {
-        let fin = "", inter = "";
-        for (let i = 0; i < e.results.length; i++) {
+        if (recSessionRef.current !== session) return; // ignore stale recognizer
+        let interim = "";
+        // resultIndex ensures we only read NEW results, never re-append old finals
+        for (let i = e.resultIndex; i < e.results.length; i++) {
           const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) fin += t + " "; else inter += t;
+          if (e.results[i].isFinal) finalRef.current += t + " ";
+          else interim += t;
         }
-        finalRef.current = accRef.current + fin;
-        setLiveText(accRef.current + fin + inter);
+        setLiveText(finalRef.current + interim);
       };
       rec.onerror = () => {};
       rec.onend = () => {
-        if (restartRef.current && phaseRef.current === "listening") {
-          accRef.current = finalRef.current;
-          try { const r2 = createRec(); recRef.current = r2; r2.start(); } catch (_) {}
+        // Only the current session may auto-restart, and only while still listening
+        if (recSessionRef.current === session && restartRef.current && phaseRef.current === "listening") {
+          try { rec.start(); } catch (_) {
+            try { const r2 = createRec(); recRef.current = r2; r2.start(); } catch (__) {}
+          }
         }
       };
       return rec;
     };
 
-    const rec = createRec(); recRef.current = rec; rec.start();
+    const rec = createRec(); recRef.current = rec;
+    try { rec.start(); } catch (_) {}
     setLiveText(""); setPhase("listening");
   };
 
   const stopRecording = () => {
     restartRef.current = false;
-    speechIdRef.current++; // also invalidate callbacks when stopping
+    recSessionRef.current++;     // invalidate this session so no stale callback writes
+    speechIdRef.current++;
     try { recRef.current?.stop(); } catch (_) {}
     const answer = finalRef.current.trim() || liveText.trim();
     if (!answer) { setPhase("ready"); return; }
@@ -842,15 +855,16 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
 
       {!["editing","scoring","closing"].includes(phase) && (
         <div style={{ marginTop:26, display:"flex", justifyContent:"center", gap:10, flexWrap:"wrap" }}>
-          {phase==="ready"     && <button onClick={startListening} style={pBtn()}>🎤 Answer now</button>}
+          {/* Answer now is available in BOTH ready and asking, so the user is never stuck waiting for audio */}
+          {(phase==="ready" || phase==="asking") && (
+            <button onClick={() => { speechIdRef.current++; window.speechSynthesis.cancel(); startListening(); }} style={pBtn()}>
+              🎤 Answer now
+            </button>
+          )}
           {phase==="listening" && <button onClick={stopRecording}  style={{ ...pBtn(), background:C.green, boxShadow:`0 4px 18px ${C.green}50` }}>✓ Done answering</button>}
           {phase==="asking"    && (
             <button
-              onClick={() => {
-                speechIdRef.current++; // FIX: invalidate speech callbacks before cancelling
-                window.speechSynthesis.cancel();
-                setPhase("ready");
-              }}
+              onClick={() => { speechIdRef.current++; window.speechSynthesis.cancel(); setPhase("ready"); }}
               style={gBtn()}>Skip audio →</button>
           )}
           {["ready","asking"].includes(phase) && qCount >= 3 && (
