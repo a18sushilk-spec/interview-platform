@@ -699,43 +699,47 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
     if (!SR) { setError("Speech recognition requires Google Chrome on desktop."); return; }
     window.speechSynthesis.cancel();
     speechIdRef.current++;
-    // accRef = text "banked" from earlier recognition sessions (across auto-restarts)
-    // finalRef = full answer so far (banked + this session's finals)
+    // accRef  = text BANKED from completed utterances (everything said so far, finalized)
+    // finalRef = full current answer = banked + live utterance
     accRef.current = "";
     finalRef.current = "";
     restartRef.current = true;
     const session = ++recSessionRef.current;
 
+    // SINGLE-UTTERANCE architecture (continuous=false):
+    // Each recognizer captures ONE phrase, then ends. We bank its final text and
+    // immediately start a fresh recognizer for the next phrase. Because every
+    // recognizer's results array only ever holds the CURRENT phrase, the mobile
+    // "replay" bug cannot duplicate earlier text, and laptop long-answers are kept
+    // because each phrase is banked into accRef before the next recognizer starts.
     const createRec = () => {
       const rec = new SR();
-      rec.continuous = true; rec.interimResults = true; rec.lang = "en-IN";
+      rec.continuous = false;        // <-- key change: one phrase per recognizer
+      rec.interimResults = true;
+      rec.lang = "en-IN";
 
       rec.onresult = (e) => {
         if (recSessionRef.current !== session) return; // ignore stale recognizer
-        // Rebuild THIS session's text from scratch every event (index 0..end).
-        // This is the key fix: never use += , so replayed results can't duplicate.
-        let sessFinal = "", interim = "";
+        let utterFinal = "", interim = "";
         for (let i = 0; i < e.results.length; i++) {
           const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) sessFinal += t + " ";
+          if (e.results[i].isFinal) utterFinal += t + " ";
           else interim += t;
         }
-        finalRef.current = (accRef.current + sessFinal).trim();
-        setLiveText((accRef.current + sessFinal + interim).trim());
+        // Display = everything banked + the phrase currently being spoken.
+        finalRef.current = (accRef.current + utterFinal).trim();
+        setLiveText((accRef.current + utterFinal + interim).trim());
       };
 
       rec.onerror = () => {};
 
       rec.onend = () => {
-        if (recSessionRef.current !== session || !restartRef.current || phaseRef.current !== "listening") return;
-        // Bank what this session produced, then start a brand-new recognizer.
-        // (A fresh object is more reliable than restarting the same one, esp. on mobile.)
-        accRef.current = finalRef.current ? finalRef.current + " " : "";
-        try {
-          const next = createRec();
-          recRef.current = next;
-          next.start();
-        } catch (_) {}
+        if (recSessionRef.current !== session) return;
+        // Bank this phrase's finalized text, then start the next recognizer.
+        accRef.current = finalRef.current ? finalRef.current + " " : accRef.current;
+        if (restartRef.current && phaseRef.current === "listening") {
+          try { const next = createRec(); recRef.current = next; next.start(); } catch (_) {}
+        }
       };
       return rec;
     };
@@ -751,7 +755,10 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
     recSessionRef.current++;     // invalidate this session so no stale callback writes
     speechIdRef.current++;
     try { recRef.current?.stop(); } catch (_) {}
-    const answer = finalRef.current.trim() || liveText.trim();
+    // Use whichever is most complete: liveText includes any in-progress (interim) phrase
+    const a = finalRef.current.trim();
+    const b = liveText.trim();
+    const answer = b.length > a.length ? b : a;
     if (!answer) { setPhase("ready"); return; }
     setEditedAnswer(answer); setLiveText(""); setPhase("editing");
   };
