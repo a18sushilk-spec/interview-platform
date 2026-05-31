@@ -107,27 +107,33 @@ export default function App() {
   const [transcript, setTranscript] = useState([]);
   const [report,     setReport]     = useState(null);
 
+  // Verify stored token; restore that user's saved form only if the SAME user returns
   useEffect(() => {
     const token = localStorage.getItem("pl_token");
     if (!token) return;
     fetch("/api/auth/verify", { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => { if (d.user) setUser(d.user); }).catch(() => {});
+      .then(r => r.json())
+      .then(d => {
+        if (!d.user) return;
+        setUser(d.user);
+        // Restore form scoped to THIS user's email
+        try {
+          const saved = JSON.parse(localStorage.getItem(`pl_form_${d.user.email}`) || "{}");
+          if (saved.resume)   setResume(saved.resume);
+          if (saved.jd)       setJd(saved.jd);
+          if (saved.role)     setRole(saved.role);
+          if (saved.company)  setCompany(saved.company);
+          if (saved.industry) setIndustry(saved.industry);
+        } catch (_) {}
+      })
+      .catch(() => {});
   }, []);
 
+  // Persist form only for logged-in users, scoped to their email. Anonymous = nothing saved.
   useEffect(() => {
-    try {
-      const d = JSON.parse(localStorage.getItem("pl_form") || "{}");
-      if (d.resume)   setResume(d.resume);
-      if (d.jd)       setJd(d.jd);
-      if (d.role)     setRole(d.role);
-      if (d.company)  setCompany(d.company);
-      if (d.industry) setIndustry(d.industry);
-    } catch (_) {}
-  }, []);
-
-  useEffect(() => {
-    try { localStorage.setItem("pl_form", JSON.stringify({ resume, jd, role, company, industry })); } catch (_) {}
-  }, [resume, jd, role, company, industry]);
+    if (!user?.email) return;
+    try { localStorage.setItem(`pl_form_${user.email}`, JSON.stringify({ resume, jd, role, company, industry })); } catch (_) {}
+  }, [user, resume, jd, role, company, industry]);
 
   const login = (token, u) => {
     localStorage.setItem("pl_token", token);
@@ -139,14 +145,17 @@ export default function App() {
     else setStage("setup");
   };
   const logout = () => {
-    localStorage.removeItem("pl_token"); localStorage.removeItem("pl_user");
-    localStorage.removeItem("pl_form");              // clear cached resume/role of previous user
-    localStorage.removeItem("pl_interview_progress"); // clear saved interview of previous user
-    setUser(null);
     track("user_logged_out");
     resetUser();
     // Stop Google from silently auto-signing the same account back in
     try { window.google?.accounts?.id?.disableAutoSelect(); } catch (_) {}
+    // Clear session token + any in-progress interview (per-user form data is kept,
+    // keyed by email, so it returns only when THAT user logs back in)
+    localStorage.removeItem("pl_token");
+    localStorage.removeItem("pl_user");
+    localStorage.removeItem("pl_interview_progress");
+    // Hard reload to a clean home page so everything is fully refreshed
+    window.location.href = "/";
   };
   const handleStart = () => {
     const hasToken = !!localStorage.getItem("pl_token");
@@ -689,38 +698,50 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SR) { setError("Speech recognition requires Google Chrome on desktop."); return; }
     window.speechSynthesis.cancel();
-    speechIdRef.current++;        // invalidate any pending speech onEnd callbacks
-    finalRef.current = "";        // committed (final) text only — appended once each
+    speechIdRef.current++;
+    // accRef = text "banked" from earlier recognition sessions (across auto-restarts)
+    // finalRef = full answer so far (banked + this session's finals)
+    accRef.current = "";
+    finalRef.current = "";
     restartRef.current = true;
-    const session = ++recSessionRef.current; // unique id for THIS listening session
+    const session = ++recSessionRef.current;
 
     const createRec = () => {
       const rec = new SR();
       rec.continuous = true; rec.interimResults = true; rec.lang = "en-IN";
+
       rec.onresult = (e) => {
         if (recSessionRef.current !== session) return; // ignore stale recognizer
-        let interim = "";
-        // resultIndex ensures we only read NEW results, never re-append old finals
-        for (let i = e.resultIndex; i < e.results.length; i++) {
+        // Rebuild THIS session's text from scratch every event (index 0..end).
+        // This is the key fix: never use += , so replayed results can't duplicate.
+        let sessFinal = "", interim = "";
+        for (let i = 0; i < e.results.length; i++) {
           const t = e.results[i][0].transcript;
-          if (e.results[i].isFinal) finalRef.current += t + " ";
+          if (e.results[i].isFinal) sessFinal += t + " ";
           else interim += t;
         }
-        setLiveText(finalRef.current + interim);
+        finalRef.current = (accRef.current + sessFinal).trim();
+        setLiveText((accRef.current + sessFinal + interim).trim());
       };
+
       rec.onerror = () => {};
+
       rec.onend = () => {
-        // Only the current session may auto-restart, and only while still listening
-        if (recSessionRef.current === session && restartRef.current && phaseRef.current === "listening") {
-          try { rec.start(); } catch (_) {
-            try { const r2 = createRec(); recRef.current = r2; r2.start(); } catch (__) {}
-          }
-        }
+        if (recSessionRef.current !== session || !restartRef.current || phaseRef.current !== "listening") return;
+        // Bank what this session produced, then start a brand-new recognizer.
+        // (A fresh object is more reliable than restarting the same one, esp. on mobile.)
+        accRef.current = finalRef.current ? finalRef.current + " " : "";
+        try {
+          const next = createRec();
+          recRef.current = next;
+          next.start();
+        } catch (_) {}
       };
       return rec;
     };
 
-    const rec = createRec(); recRef.current = rec;
+    const rec = createRec();
+    recRef.current = rec;
     try { rec.start(); } catch (_) {}
     setLiveText(""); setPhase("listening");
   };
