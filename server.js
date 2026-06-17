@@ -1,5 +1,6 @@
 const express  = require("express");
 const path     = require("path");
+const fs       = require("fs");
 const multer   = require("multer");
 const bcrypt   = require("bcryptjs");
 const jwt      = require("jsonwebtoken");
@@ -129,6 +130,46 @@ app.post("/api/auth/google", async (req, res) => {
     console.error("Google auth error:", err.message);
     res.status(500).json({ error: "Google sign-in failed. Please try again." });
   }
+});
+
+// ── Role packs (curated question banks for realistic, role-specific interviews) ──
+let ROLE_PACKS = [];
+(function loadRolePacks() {
+  try {
+    const dir = path.join(__dirname, "data", "roles");
+    if (!fs.existsSync(dir)) return;
+    for (const f of fs.readdirSync(dir)) {
+      if (!f.endsWith(".json")) continue;
+      try { ROLE_PACKS.push(JSON.parse(fs.readFileSync(path.join(dir, f), "utf8"))); }
+      catch (e) { console.error("Bad role pack", f, e.message); }
+    }
+    console.log(`✓ Loaded ${ROLE_PACKS.length} role packs.`);
+  } catch (e) { console.error("Role pack load failed:", e.message); }
+})();
+
+function matchRolePack(roleRaw) {
+  if (!roleRaw) return null;
+  const q = roleRaw.toLowerCase().trim();
+  // 1) exact alias match  2) alias contained in query  3) query word overlap
+  let best = null, bestScore = 0;
+  for (const pack of ROLE_PACKS) {
+    for (const alias of (pack.aliases || [])) {
+      const a = alias.toLowerCase();
+      let score = 0;
+      if (q === a) score = 100;
+      else if (q.includes(a)) score = 50 + a.length;   // longer alias = more specific
+      else if (a.includes(q) && q.length >= 4) score = 30;
+      if (score > bestScore) { bestScore = score; best = pack; }
+    }
+  }
+  return bestScore >= 30 ? best : null;
+}
+
+// Returns the matched role pack (or null) for a given role string
+app.get("/api/role-pack", (req, res) => {
+  const pack = matchRolePack(req.query.role || "");
+  if (!pack) return res.json({ matched: false });
+  res.json({ matched: true, pack });
 });
 
 // ── Claude proxy ──────────────────────────────────────────────────────────────

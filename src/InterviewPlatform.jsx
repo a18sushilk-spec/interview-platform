@@ -643,9 +643,21 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
   const [editedAnswer, setEditedAnswer] = useState("");
   const [qCount,       setQCount]       = useState(savedProgress ? savedProgress.qCount    : 0);
   const [error,        setError]        = useState("");
+  const [rolePack,     setRolePack]     = useState(null);
+  const [packLoading,  setPackLoading]  = useState(true);
   const SOFT_MAX = 15;
 
   useEffect(() => { phaseRef.current = phase; }, [phase]);
+
+  // Fetch the curated role pack for this role before starting (RAG-lite retrieval)
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/role-pack?role=${encodeURIComponent(role || "")}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled) { setRolePack(d.matched ? d.pack : null); setPackLoading(false); } })
+      .catch(() => { if (!cancelled) setPackLoading(false); });
+    return () => { cancelled = true; };
+  }, [role]);
 
   useEffect(() => {
     const pick = () => { voiceRef.current = resolveVoice(p.gender); };
@@ -666,12 +678,23 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
     } catch (_) {}
   }, [p]);
 
+  // Reference material from the curated role pack (only if a pack matched this role)
+  const packBlock = rolePack
+    ? `\n\nREFERENCE MATERIAL FOR THIS ROLE ("${rolePack.role}") — use this to make the interview authentic and role-specific:\n` +
+      `KEY COMPETENCIES TO ASSESS: ${(rolePack.competencies || []).join("; ")}.\n` +
+      `REPRESENTATIVE QUESTIONS (adapt to the candidate's resume — rephrase, don't read verbatim, pick the most relevant):\n` +
+      (rolePack.questions || []).map((q, i) => `${i + 1}. ${q}`).join("\n") + "\n" +
+      (rolePack.note ? `IMPORTANT FORMAT NOTE: ${rolePack.note}\n` : "") +
+      `Cover the competencies above as your assessment parameters.`
+    : "";
+
   const sys =
     `You are ${p.name}, a seasoned Indian professional with ${p.exp} years of experience in ${p.bg}. ` +
     `You speak clear, professional Indian English — warm, rigorous, senior. You are conducting a job interview.\n\n` +
     `ROLE: ${role}` + (company?`\nCOMPANY: ${company}`:"") + (industry?`\nINDUSTRY: ${industry}`:"") +
-    `\n\nJOB DESCRIPTION:\n${(jd||"Not provided").slice(0,1200)}\n\nCANDIDATE RESUME:\n${resume.slice(0,1200)}\n\n` +
-    `STEP 1 (internal): Identify 5–7 key assessment parameters for this role. Prioritise per JD.\n` +
+    `\n\nJOB DESCRIPTION:\n${(jd||"Not provided").slice(0,1200)}\n\nCANDIDATE RESUME:\n${resume.slice(0,1200)}` +
+    packBlock +
+    `\n\nSTEP 1 (internal): ${rolePack ? "Use the competencies above as your assessment parameters." : "Identify 5–7 key assessment parameters for this role. Prioritise per JD."}\n` +
     `STEP 2 RULES:\n- Open warmly and ask for a self-introduction.\n- For each parameter: 1 focused main question.\n` +
     `- Follow-ups: 0–2 per parameter MAX, never more regardless of answer quality.\n` +
     `- After all parameters are covered, close the interview warmly.\n` +
@@ -689,10 +712,10 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
   }, [sys, doSpeak]);
 
   useEffect(() => {
-    if (startedRef.current || showResume) return;
+    if (startedRef.current || showResume || packLoading) return; // wait for role pack to load first
     startedRef.current = true;
     getNext([{ role:"user", content:"Please begin the interview now." }]);
-  }, [getNext, showResume]);
+  }, [getNext, showResume, packLoading]);
 
   const startListening = () => {
     const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -794,9 +817,12 @@ function Interview({ resume, jd, role, company, industry, onFinish, onFreshStart
   const buildReport = async (finalTranscript) => {
     setPhase("scoring");
     const qa = finalTranscript.map((t,i)=>`Q${i+1}: ${t.q}\nA${i+1}: ${t.a}`).join("\n\n");
+    const rubricBlock = rolePack?.rubric
+      ? `\nSCORING RUBRIC for a ${rolePack.role}:\nSTRONG answer: ${rolePack.rubric.strong}\nWEAK answer: ${rolePack.rubric.weak}\nScore strictly against this rubric.\n`
+      : "";
     const rSys =
       `You are an expert interview coach. Role: "${role}"${company?` at ${company}`:""}.` +
-      `\nJD: ${(jd||"Not provided").slice(0,600)}\nResume: ${resume.slice(0,600)}\n\n` +
+      `\nJD: ${(jd||"Not provided").slice(0,600)}\nResume: ${resume.slice(0,600)}\n` + rubricBlock + `\n` +
       `Return ONLY valid JSON, no markdown, no extra text:\n` +
       `{"overall":<0-100>,"verdict":"<one punchy sentence>","strengths":["...","...","..."],"gaps":["...","...","..."],` +
       `"perQuestion":[{"question":"<short>","score":<0-10>,"good":"<what worked>","improve":"<specific fix>","modelAnswer":"<2-3 stronger sentences>"}]}`;

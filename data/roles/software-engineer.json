@@ -1,0 +1,27 @@
+{
+  "role": "Software Engineer",
+  "aliases": ["software engineer", "sde", "swe", "developer", "software developer", "backend engineer", "frontend engineer", "full stack", "fullstack", "programmer", "sde-1", "sde 1", "associate software engineer"],
+  "level": "entry-mid",
+  "note": "Voice interview — focus on concepts, problem-solving approach, and behavioural. Do NOT ask the candidate to write or dictate code character by character; ask them to explain approach and reasoning out loud.",
+  "competencies": [
+    "Data structures & algorithms (conceptual)",
+    "Problem-solving approach & complexity reasoning",
+    "System design fundamentals",
+    "Debugging & code quality",
+    "Collaboration & ownership"
+  ],
+  "questions": [
+    "Explain how you would approach finding duplicate entries in a very large list. Talk me through your thinking and the trade-offs.",
+    "What's the difference between an array and a hash map, and when would you choose one over the other?",
+    "Walk me through how you would design a simple URL shortener at a high level.",
+    "Describe a challenging bug you faced. How did you isolate and fix it?",
+    "How do you decide whether code is 'good'? What do you look for in a code review?",
+    "Explain time and space complexity in your own words, with an example.",
+    "Tell me about a project where you owned a feature end to end. What did you build and what did you learn?",
+    "How would you keep a web application fast as the number of users grows?"
+  ],
+  "rubric": {
+    "strong": "Reasons about trade-offs and complexity, breaks problems into steps, asks clarifying questions, explains clearly without hand-waving, shows real ownership in projects.",
+    "weak": "Memorised definitions without understanding, no complexity awareness, can't structure a problem, vague project contributions."
+  }
+}

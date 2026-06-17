@@ -81,6 +81,20 @@ async function run() {
   check("get ratings returns array", Array.isArray(rg.json), JSON.stringify(rg.json).slice(0, 120));
   check("posted rating appears in list", Array.isArray(rg.json) && rg.json.some(x => x.review === "Great!"), "");
 
+  // ── Role packs (RAG-lite retrieval) ──
+  const rp1 = await get("/api/role-pack?role=" + encodeURIComponent("Product Manager"));
+  check("role-pack matches 'Product Manager'", rp1.json.matched && /product/i.test(rp1.json.pack?.role || ""), JSON.stringify(rp1.json).slice(0,120));
+  const rp2 = await get("/api/role-pack?role=" + encodeURIComponent("APM"));
+  check("role-pack matches alias 'APM' to Product Manager", rp2.json.matched && /product/i.test(rp2.json.pack?.role || ""), JSON.stringify(rp2.json).slice(0,120));
+  const rp3 = await get("/api/role-pack?role=" + encodeURIComponent("Senior Data Scientist"));
+  check("role-pack matches 'Senior Data Scientist'", rp3.json.matched && /data/i.test(rp3.json.pack?.role || ""), JSON.stringify(rp3.json).slice(0,120));
+  const rp4 = await get("/api/role-pack?role=" + encodeURIComponent("Underwater Basket Weaver"));
+  check("role-pack returns no match for unknown role (graceful fallback)", rp4.json.matched === false, JSON.stringify(rp4.json));
+  const rp5 = await get("/api/role-pack?role=" + encodeURIComponent("consultant"));
+  check("role-pack matches 'consultant'", rp5.json.matched && /consultant/i.test(rp5.json.pack?.role || ""), JSON.stringify(rp5.json).slice(0,120));
+  const rp6 = await get("/api/role-pack?role=" + encodeURIComponent("scrum master"));
+  check("role-pack matches 'scrum master' to Project Manager", rp6.json.matched && /project/i.test(rp6.json.pack?.role || ""), JSON.stringify(rp6.json).slice(0,120));
+
   // ── Output ──
   console.log("\n──────── BACKEND API TEST RESULTS ────────");
   console.log(results.join("\n"));

@@ -1,0 +1,26 @@
+{
+  "role": "Product Manager",
+  "aliases": ["pm", "product manager", "associate product manager", "apm", "product owner", "product analyst", "sr product manager", "senior product manager"],
+  "level": "entry-mid",
+  "competencies": [
+    "Product sense & user empathy",
+    "Prioritisation & trade-offs",
+    "Metrics & data-driven decisions",
+    "Execution & stakeholder management",
+    "Communication & structured thinking"
+  ],
+  "questions": [
+    "Walk me through a product you admire and explain what makes it well designed from a user's perspective.",
+    "Tell me about a time you had to prioritise between several competing features. How did you decide what to build first?",
+    "Imagine our daily active users dropped 15% last week. How would you investigate the cause?",
+    "How would you measure the success of a feature you launched? Which metrics would you track and why?",
+    "Describe a product you improved or shipped. What was your specific contribution and what was the outcome?",
+    "A key engineering stakeholder disagrees with your roadmap priority. How do you handle that conversation?",
+    "How would you design a product for first-time smartphone users in a tier-3 Indian city?",
+    "Tell me about a decision you made with incomplete data. How did you reduce the risk?"
+  ],
+  "rubric": {
+    "strong": "Structured answers (problem → users → options → decision → metrics), shows genuine user empathy, quantifies impact, acknowledges trade-offs, references real experience from the resume.",
+    "weak": "Jumps to solutions without understanding the user/problem, no metrics, vague 'we' instead of 'I', no trade-off awareness."
+  }
+}

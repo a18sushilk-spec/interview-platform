@@ -1,0 +1,26 @@
+{
+  "role": "Management Consultant",
+  "aliases": ["management consultant", "consultant", "consulting", "strategy consultant", "business consultant", "associate consultant", "analyst consulting", "strategy analyst"],
+  "level": "entry-mid",
+  "competencies": [
+    "Structured problem-solving (frameworks)",
+    "Quantitative & estimation skills",
+    "Business judgement & commercial sense",
+    "Hypothesis-driven thinking",
+    "Clear, top-down communication"
+  ],
+  "questions": [
+    "Our client is a coffee chain whose profits have fallen 20% this year. How would you structure your approach to finding the cause?",
+    "Estimate the number of cars sold in India in a year. Walk me through your reasoning out loud.",
+    "A retail client is deciding whether to enter the online grocery market. What factors would you analyse?",
+    "How would you improve the profitability of a struggling movie theatre?",
+    "Tell me about a time you solved a complex problem with limited information. How did you structure it?",
+    "Walk me through how you would size the market for electric two-wheelers in India.",
+    "A client wants to cut costs by 15%. How would you identify where to cut without hurting the business?",
+    "How do you communicate a recommendation when the data is ambiguous?"
+  ],
+  "rubric": {
+    "strong": "Top-down structured frameworks (MECE), states hypotheses, does clean back-of-envelope math out loud, commercially sensible, summarises recommendation clearly, checks assumptions.",
+    "weak": "Unstructured rambling, no framework, math errors or avoids numbers, no clear recommendation, ignores business context."
+  }
+}

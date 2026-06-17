@@ -1,0 +1,26 @@
+{
+  "role": "Project Manager",
+  "aliases": ["project manager", "program manager", "pmo", "delivery manager", "scrum master", "project lead", "project coordinator", "associate project manager", "technical project manager", "tpm"],
+  "level": "entry-mid",
+  "competencies": [
+    "Planning & scoping",
+    "Risk & dependency management",
+    "Stakeholder communication",
+    "Execution & delivery under constraints",
+    "Conflict resolution & team coordination"
+  ],
+  "questions": [
+    "Tell me about a project you managed end to end. How did you plan it and what was the outcome?",
+    "A critical project is running two weeks behind schedule. What do you do?",
+    "How do you handle a stakeholder who keeps changing requirements mid-project?",
+    "Describe how you identify and manage risks before they become problems.",
+    "Two team members are in conflict and it's slowing delivery. How do you resolve it?",
+    "How do you prioritise tasks when everything is marked 'urgent'?",
+    "Walk me through how you keep stakeholders aligned and informed during a long project.",
+    "Tell me about a project that did not go as planned. What went wrong and what did you learn?"
+  ],
+  "rubric": {
+    "strong": "Clear planning structure, proactive risk thinking, concrete communication cadence, calm under constraints, quantifies delivery outcomes, owns failures with lessons.",
+    "weak": "Reactive only, no risk planning, vague on stakeholder management, blames others for failures, no measurable results."
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "role": "Data Analyst / Data Scientist",
+  "aliases": ["data analyst", "data scientist", "analytics", "business analyst", "bi analyst", "data analytics", "ds", "da", "analytics associate", "decision scientist"],
+  "level": "entry-mid",
+  "competencies": [
+    "SQL & data manipulation",
+    "Statistics & experimentation",
+    "Business problem framing",
+    "Insight communication & storytelling",
+    "Practical tooling (Excel, Python/R, dashboards)"
+  ],
+  "questions": [
+    "Walk me through how you would investigate why a company's monthly revenue suddenly declined.",
+    "Explain the difference between correlation and causation with an example from your own work.",
+    "How would you explain a statistically significant A/B test result to a non-technical stakeholder?",
+    "Describe a data project you worked on end to end — from the question to the insight to the action taken.",
+    "If you had a table of orders and a table of customers, how would you find the top 5 customers by total spend? Talk me through the logic.",
+    "How do you handle missing or messy data before analysis?",
+    "Tell me about a time your analysis changed a business decision. What was the impact?",
+    "What metrics would you choose to measure the health of a subscription business?"
+  ],
+  "rubric": {
+    "strong": "Clear analytical structure, correct statistical reasoning, translates numbers into business action, communicates simply, shows hands-on tool fluency, quantifies impact.",
+    "weak": "Confuses correlation/causation, jargon without clarity, no business framing, can't describe a concrete project, no measurable outcome."
+  }
+}
