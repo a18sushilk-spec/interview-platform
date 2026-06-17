@@ -1,0 +1,26 @@
+{
+  "role": "Founder's Office / Chief of Staff",
+  "aliases": ["founder's office", "founders office", "chief of staff", "cos", "ceo office", "office of ceo", "office of the founder", "strategy and operations", "biz ops", "business operations", "founder office associate", "eir", "entrepreneur in residence"],
+  "level": "entry-mid",
+  "competencies": [
+    "Structured problem-solving & first-principles thinking",
+    "Cross-functional execution & ownership",
+    "Business & commercial acumen",
+    "Data-driven decision making",
+    "Communication, influence & high agency"
+  ],
+  "questions": [
+    "The founder's office sits at the intersection of strategy and execution. Tell me about a time you took an ambiguous problem and drove it to a concrete outcome.",
+    "Our company wants to enter a new city or market. How would you structure your thinking to decide if it's worth it?",
+    "Describe a time you had to influence people who didn't report to you to get something done. How did you do it?",
+    "You're handed three urgent priorities from three different department heads, all due this week. How do you decide what to do?",
+    "How would you measure whether a new initiative the founder cares about is actually working? What would you track?",
+    "Tell me about a time you spotted a problem nobody had flagged yet and took the initiative to fix it.",
+    "The founder asks you for a recommendation on a decision in 24 hours, but the data is incomplete. How do you proceed?",
+    "Walk me through how you would quickly get up to speed on a part of the business you know nothing about."
+  ],
+  "rubric": {
+    "strong": "Demonstrates high agency and ownership, structures ambiguous problems clearly, balances strategy with hands-on execution, uses data and commercial judgement, influences without authority, communicates crisply, shows bias for action.",
+    "weak": "Waits for instructions, no structure for ambiguity, all theory and no execution, ignores business/commercial impact, can't show initiative or measurable outcomes."
+  }
+}

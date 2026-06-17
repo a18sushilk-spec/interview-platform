@@ -1,0 +1,26 @@
+{
+  "role": "Marketing Manager",
+  "aliases": ["marketing manager", "marketing", "brand manager", "digital marketing manager", "growth manager", "growth marketing", "performance marketing", "marketing lead", "marketing associate", "product marketing manager", "pmm", "social media manager", "content marketing manager"],
+  "level": "entry-mid",
+  "competencies": [
+    "Marketing strategy & positioning",
+    "Channel & campaign execution (digital, brand, content)",
+    "Metrics, ROI & funnel analysis",
+    "Customer & market understanding",
+    "Creativity balanced with data"
+  ],
+  "questions": [
+    "Walk me through a marketing campaign you ran end to end. What was the goal, what did you do, and what were the results?",
+    "How would you launch a new product with a limited budget? Where would you spend first and why?",
+    "Which marketing metrics do you care about most, and how do you decide if a campaign succeeded or failed?",
+    "How would you decide between spending on brand building versus performance/demand-generation marketing?",
+    "Tell me about a campaign that underperformed. How did you diagnose what went wrong and what did you change?",
+    "How would you define and reach the target audience for a new fintech app aimed at young Indians?",
+    "How do you balance creative instinct with what the data tells you when they disagree?",
+    "Describe how you would improve a marketing funnel where lots of people visit the website but very few sign up."
+  ],
+  "rubric": {
+    "strong": "Connects marketing activity to business goals and ROI, segments audiences clearly, fluent with funnel metrics (CAC, conversion, retention), balances brand and performance, learns from failures, shows both creativity and analytical rigour, quantifies impact.",
+    "weak": "Vanity-metric focus (likes/impressions only), no audience targeting, can't tie spend to outcomes, no funnel understanding, vague campaign contribution, ignores ROI."
+  }
+}

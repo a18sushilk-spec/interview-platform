@@ -94,6 +94,10 @@ async function run() {
   check("role-pack matches 'consultant'", rp5.json.matched && /consultant/i.test(rp5.json.pack?.role || ""), JSON.stringify(rp5.json).slice(0,120));
   const rp6 = await get("/api/role-pack?role=" + encodeURIComponent("scrum master"));
   check("role-pack matches 'scrum master' to Project Manager", rp6.json.matched && /project/i.test(rp6.json.pack?.role || ""), JSON.stringify(rp6.json).slice(0,120));
+  const rp7 = await get("/api/role-pack?role=" + encodeURIComponent("Chief of Staff"));
+  check("role-pack matches 'Chief of Staff' to Founder's Office", rp7.json.matched && /founder/i.test(rp7.json.pack?.role || ""), JSON.stringify(rp7.json).slice(0,120));
+  const rp8 = await get("/api/role-pack?role=" + encodeURIComponent("Growth Marketing Manager"));
+  check("role-pack matches 'Growth Marketing Manager' to Marketing", rp8.json.matched && /marketing/i.test(rp8.json.pack?.role || ""), JSON.stringify(rp8.json).slice(0,120));
 
   // ── Output ──
   console.log("\n──────── BACKEND API TEST RESULTS ────────");
